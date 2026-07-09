@@ -15,18 +15,56 @@ table td,table th{padding:2px 4px}
 </style>
 </head>
 <body class="bg-gray-100 p-3 text-xs">
-<div id="app" class="max-w-6xl mx-auto space-y-2"></div>
-<script>
+<div id="loginScreen" class="min-h-screen flex items-center justify-center">
+ <div class="bg-white p-6 rounded-lg shadow w-72 text-center">
+  <div class="font-bold text-base mb-3">分光光度儀對色系統</div>
+  <div class="mb-2 text-left text-gray-600">請輸入密碼</div>
+  <input id="pwInput" type="password" class="border p-2 rounded w-full mb-2" onkeydown="if(event.key==='Enter')tryLogin()">
+  <div id="pwErr" class="hidden text-red-600 mb-2">密碼錯誤</div>
+  <button class="bg-blue-600 text-white px-4 py-2 rounded w-full" onclick="tryLogin()">登入</button>
+ </div>
+</div>
+<div id="app" class="max-w-6xl mx-auto space-y-2 hidden"></div>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBHoR66Q4aLY1Qk3ShHnApipnff4TMQEnQ",
+  authDomain: "color-matching-95057.firebaseapp.com",
+  projectId: "color-matching-95057",
+  storageBucket: "color-matching-95057.firebasestorage.app",
+  messagingSenderId: "42229636253",
+  appId: "1:42229636253:web:92fdef7d4ee467e5f3c874",
+  measurementId: "G-D4ETMME5FY"
+};
+const fbApp=initializeApp(firebaseConfig);
+const analytics=getAnalytics(fbApp);
+const db=getFirestore(fbApp);
+const colRef=collection(db,'colorants');
+const specRef=collection(db,'spectra');
+
 const CONCS=[0.2,0.5,1,3,5];
 const BGS=[["white","白底"],["black","黑底"]];
 const WL=Array.from({length:31},(_,i)=>400+i*10);
 let DB={colorants:[],spectra:[]};
-let ui={tab:'a',activeId:null};
+let ui={tab:'a',activeId:null,synced:false};
 
 function uid(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
-function load(){try{DB=JSON.parse(localStorage.getItem('cms_db'))||{colorants:[],spectra:[]}}catch(e){DB={colorants:[],spectra:[]}}}
-function save(){localStorage.setItem('cms_db',JSON.stringify(DB))}
+function cacheSave(){try{localStorage.setItem('cms_db',JSON.stringify(DB))}catch(e){}}
 function getSpec(cid,conc,bg){return DB.spectra.find(s=>s.colorant_id===cid&&s.concentration===conc&&s.bg_type===bg)}
+
+function initSync(){
+ onSnapshot(colRef,snap=>{
+  DB.colorants=snap.docs.map(d=>({id:d.id,...d.data()}));
+  ui.synced=true;cacheSave();render();
+ });
+ onSnapshot(specRef,snap=>{
+  DB.spectra=snap.docs.map(d=>({id:d.id,...d.data()}));
+  cacheSave();render();
+ });
+}
 
 function deltaE00(L1,a1,b1,L2,a2,b2){
  const C1=Math.hypot(a1,b1),C2=Math.hypot(a2,b2),Cbar=(C1+C2)/2;
@@ -68,6 +106,7 @@ function interpLab(points,c){
 function render(){
  const app=document.getElementById('app');
  app.innerHTML=`
+ <div class="flex justify-end text-gray-500 mb-1">${ui.synced?'☁ 已同步至雲端':'☁ 連線中...'}</div>
  <div class="flex space-x-1">
   <div class="tab ${ui.tab==='a'?'tabA':'tabI'}" onclick="ui.tab='a';render()">1. 色漿與批號</div>
   <div class="tab ${ui.tab==='b'?'tabA':'tabI'}" onclick="ui.tab='b';render()">2. 數據錄入</div>
@@ -95,20 +134,21 @@ function tabColorant(){
   <tbody>${rows||'<tr><td colspan=4 class="text-gray-400 py-2">尚無色漿，請先新增</td></tr>'}</tbody></table>`;
 }
 
-function addColorant(){
+async function addColorant(){
  const name=document.getElementById('ncName').value.trim();
  const lot=document.getElementById('ncLot').value.trim();
  if(!name)return alert('請輸入色漿名稱');
  const id=uid('col_');
- DB.colorants.push({id,name,lot_number:lot});
- ui.activeId=id;save();render();
+ ui.activeId=id;
+ await setDoc(doc(colRef,id),{name,lot_number:lot});
 }
-function delColorant(id){
+async function delColorant(id){
  if(!confirm('確定刪除此色漿及其所有數據？'))return;
- DB.colorants=DB.colorants.filter(c=>c.id!==id);
- DB.spectra=DB.spectra.filter(s=>s.colorant_id!==id);
  if(ui.activeId===id)ui.activeId=null;
- save();render();
+ await deleteDoc(doc(colRef,id));
+ const q=query(specRef,where('colorant_id','==',id));
+ const snap=await getDocs(q);
+ for(const d of snap.docs)await deleteDoc(d.ref);
 }
 
 function tabData(){
@@ -134,7 +174,7 @@ function tabData(){
  <tbody>${rows}</tbody></table>`;
 }
 
-function saveRow(conc,bg){
+async function saveRow(conc,bg){
  const rid=`${conc}_${bg}`;
  const L=parseFloat(document.getElementById(`L_${rid}`).value);
  const a=parseFloat(document.getElementById(`a_${rid}`).value);
@@ -147,9 +187,9 @@ function saveRow(conc,bg){
  }
  if(isNaN(L)||isNaN(a)||isNaN(b))return alert('請輸入完整的 L a b 數值');
  let rec=getSpec(ui.activeId,conc,bg);
- if(!rec){rec={id:uid('sd_'),colorant_id:ui.activeId,concentration:conc,bg_type:bg};DB.spectra.push(rec);}
- rec.L=L;rec.a=a;rec.b=b;rec.R=R;
- save();alert('已儲存');
+ const id=rec?rec.id:uid('sd_');
+ await setDoc(doc(specRef,id),{colorant_id:ui.activeId,concentration:conc,bg_type:bg,L,a,b,R});
+ alert('已儲存並同步至雲端');
 }
 
 function tabMatch(){
@@ -300,7 +340,34 @@ function runRecipePredict(){
  out.innerHTML=res.map(r=>`<div>${r.name}：<span class="font-bold text-indigo-700">${r.percent}%</span></div>`).join('');
 }
 
-load();render();
+window.render=render;
+window.addColorant=addColorant;
+window.delColorant=delColorant;
+window.saveRow=saveRow;
+window.runMatch=runMatch;
+window.runRecipePredict=runRecipePredict;
+window.ui=ui;
+
+const APP_PASSWORD='123456abc';
+function showApp(){
+ document.getElementById('loginScreen').classList.add('hidden');
+ document.getElementById('app').classList.remove('hidden');
+ try{DB=JSON.parse(localStorage.getItem('cms_db'))||DB}catch(e){}
+ render();
+ initSync();
+}
+function tryLogin(){
+ const v=document.getElementById('pwInput').value;
+ if(v===APP_PASSWORD){
+  sessionStorage.setItem('cms_auth','1');
+  showApp();
+ }else{
+  document.getElementById('pwErr').classList.remove('hidden');
+ }
+}
+window.tryLogin=tryLogin;
+
+if(sessionStorage.getItem('cms_auth')==='1')showApp();
 </script>
 </body>
 </html>
