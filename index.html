@@ -25,6 +25,28 @@ table td,table th{padding:2px 4px}
  </div>
 </div>
 <div id="app" class="max-w-6xl mx-auto space-y-2 hidden"></div>
+<script>
+const APP_PASSWORD='123456abc';
+function tryLogin(){
+ const v=document.getElementById('pwInput').value.trim();
+ if(v===APP_PASSWORD){
+  sessionStorage.setItem('cms_auth','1');
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  if(window.__appInit){
+   window.__appInit();
+  }else{
+   document.getElementById('app').innerHTML='<div class="p-4 text-red-600">系統模組尚未載入完成或雲端連線失敗，請稍候或重新整理頁面。若持續發生，請確認網路可連線至 Firebase。</div>';
+  }
+ }else{
+  document.getElementById('pwErr').classList.remove('hidden');
+ }
+}
+if(sessionStorage.getItem('cms_auth')==='1'){
+ document.getElementById('loginScreen').classList.add('hidden');
+ document.getElementById('app').classList.remove('hidden');
+}
+</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js";
@@ -40,7 +62,7 @@ const firebaseConfig = {
   measurementId: "G-D4ETMME5FY"
 };
 const fbApp=initializeApp(firebaseConfig);
-const analytics=getAnalytics(fbApp);
+try{getAnalytics(fbApp)}catch(e){console.warn('Analytics 初始化失敗，不影響其他功能',e)}
 const db=getFirestore(fbApp);
 const colRef=collection(db,'colorants');
 const specRef=collection(db,'spectra');
@@ -54,6 +76,11 @@ let ui={tab:'a',activeId:null,synced:false};
 function uid(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function cacheSave(){try{localStorage.setItem('cms_db',JSON.stringify(DB))}catch(e){}}
 function getSpec(cid,conc,bg){return DB.spectra.find(s=>s.colorant_id===cid&&s.concentration===conc&&s.bg_type===bg)}
+
+function parseSpectralData(str) {
+  if (!str) return [];
+  return str.trim().split(/[\s,\t\r\n]+/).map(v => parseFloat(v)).filter(v => !isNaN(v));
+}
 
 function initSync(){
  onSnapshot(colRef,snap=>{
@@ -88,19 +115,6 @@ function deltaE00(L1,a1,b1,L2,a2,b2){
  const SC=1+0.045*Cbarp,SH=1+0.015*Cbarp*T;
  const RT=-Math.sin(2*dTheta*Math.PI/180)*RC;
  return Math.sqrt((dLp/SL)**2+(dCp/SC)**2+(dHp/SH)**2+RT*(dCp/SC)*(dHp/SH));
-}
-
-function interpLab(points,c){
- if(c<=points[0].c)return points[0];
- if(c>=points[points.length-1].c)return points[points.length-1];
- for(let i=0;i<points.length-1;i++){
-  const p0=points[i],p1=points[i+1];
-  if(c>=p0.c&&c<=p1.c){
-   const t=(c-p0.c)/(p1.c-p0.c);
-   return {c,L:p0.L+(p1.L-p0.L)*t,a:p0.a+(p1.a-p0.a)*t,b:p0.b+(p1.b-p0.b)*t};
-  }
- }
- return points[points.length-1];
 }
 
 function render(){
@@ -164,7 +178,7 @@ function tabData(){
    <td><input id="L_${rid}" type="number" step="0.01" value="${rec.L??''}"></td>
    <td><input id="a_${rid}" type="number" step="0.01" value="${rec.a??''}"></td>
    <td><input id="b_${rid}" type="number" step="0.01" value="${rec.b??''}"></td>
-   <td><input id="R_${rid}" type="text" placeholder="貼上31個波長反射率(逗號分隔,400-700nm)" value="${rStr}"></td>
+   <td><input id="R_${rid}" type="text" placeholder="貼上 31 點光譜反射率 (支援空白、Tab 或逗號分隔)" value="${rStr}"></td>
    <td><button class="bg-green-600 text-white px-2 rounded" onclick="saveRow(${c},'${bg[0]}')">儲存</button></td>
   </tr>`;
  }
@@ -179,12 +193,9 @@ async function saveRow(conc,bg){
  const L=parseFloat(document.getElementById(`L_${rid}`).value);
  const a=parseFloat(document.getElementById(`a_${rid}`).value);
  const b=parseFloat(document.getElementById(`b_${rid}`).value);
- const Rraw=document.getElementById(`R_${rid}`).value.trim();
- let R=[];
- if(Rraw){
-  R=Rraw.split(',').map(v=>parseFloat(v.trim())).filter(v=>!isNaN(v));
-  if(R.length!==31)return alert('反射率須為31個數值(400-700nm,間隔10nm)');
- }
+ const Rraw=document.getElementById(`R_${rid}`).value;
+ let R=parseSpectralData(Rraw);
+ if(Rraw && R.length!==31)return alert('反射率須為 31 個數值 (400-700nm，10nm 間隔)');
  if(isNaN(L)||isNaN(a)||isNaN(b))return alert('請輸入完整的 L a b 數值');
  let rec=getSpec(ui.activeId,conc,bg);
  const id=rec?rec.id:uid('sd_');
@@ -193,116 +204,130 @@ async function saveRow(conc,bg){
 }
 
 function tabMatch(){
- if(!ui.activeId)return '<div class="text-gray-400">請先於「色漿與批號」頁選擇一個色漿</div>';
+ const checkBoxes=DB.colorants.map(c=>`
+  <label class="inline-flex items-center space-x-1 mr-2">
+   <input type="checkbox" name="mcol" value="${c.id}" checked> ${c.name}
+  </label>`).join('');
  return `
- <div class="grid grid-cols-4 gap-2 mb-3 items-end">
-  <div><label class="block">目標 L*</label><input id="tL" type="number" step="0.01"></div>
-  <div><label class="block">目標 a*</label><input id="ta" type="number" step="0.01"></div>
-  <div><label class="block">目標 b*</label><input id="tb" type="number" step="0.01"></div>
-  <div><label class="block">底材</label>
-   <select id="tbg" class="border p-1 rounded w-full">
-    <option value="white">白底</option><option value="black">黑底</option>
-   </select></div>
- </div>
- <button class="bg-indigo-600 text-white px-4 py-1 rounded" onclick="runMatch()">計算建議濃度</button>
- <div id="matchResult" class="mt-4"></div>`;
-}
+ <div class="space-y-2">
+  <div class="font-bold border-b pb-1">第一步：勾選參與調色的色漿</div>
+  <div>${checkBoxes||'<span class="text-gray-400">請先建立色漿</span>'}</div>
 
-function runMatch(){
- const bg=document.getElementById('tbg').value;
- const tL=parseFloat(document.getElementById('tL').value);
- const ta=parseFloat(document.getElementById('ta').value);
- const tb=parseFloat(document.getElementById('tb').value);
- const out=document.getElementById('matchResult');
- if(isNaN(tL)||isNaN(ta)||isNaN(tb)){out.innerHTML='<div class="text-red-600">請輸入完整目標 Lab</div>';return;}
- const pts=DB.spectra.filter(s=>s.colorant_id===ui.activeId&&s.bg_type===bg)
-  .map(s=>({c:s.concentration,L:s.L,a:s.a,b:s.b})).sort((x,y)=>x.c-y.c);
- if(pts.length<2){out.innerHTML='<div class="text-red-600">此底材至少需要2筆濃度數據才能內插計算</div>';return;}
- const cmin=pts[0].c,cmax=pts[pts.length-1].c;
- let bestC=cmin,bestDE=1e9;
- const N=800;
- for(let i=0;i<=N;i++){
-  const c=cmin+(cmax-cmin)*i/N;
-  const p=interpLab(pts,c);
-  const de=deltaE00(p.L,p.a,p.b,tL,ta,tb);
-  if(de<bestDE){bestDE=de;bestC=c;}
- }
- const eps=Math.max((cmax-cmin)/500,0.001);
- const cLo=Math.max(cmin,bestC-eps),cHi=Math.min(cmax,bestC+eps);
- const pLo=interpLab(pts,cLo),pHi=interpLab(pts,cHi);
- const dC=cHi-cLo||eps;
- const Jl=(pHi.L-pLo.L)/dC,Ja=(pHi.a-pLo.a)/dC,Jb=(pHi.b-pLo.b)/dC;
- const pBest=interpLab(pts,bestC);
- const rL=tL-pBest.L,ra=ta-pBest.a,rb=tb-pBest.b;
- const JJ=Jl*Jl+Ja*Ja+Jb*Jb;
- let dCstep=JJ>1e-9?(Jl*rL+Ja*ra+Jb*rb)/JJ:0;
- let newC=Math.min(cmax,Math.max(cmin,bestC+dCstep));
- const pNew=interpLab(pts,newC);
- const deNew=deltaE00(pNew.L,pNew.a,pNew.b,tL,ta,tb);
- let tip='';
- if(bestDE<0.3)tip='比對色差極小，配方已相當接近目標色，無需修正。';
- else{
-  const dir=dCstep>=0?'提高':'降低';
-  tip=`建議將色漿濃度由 ${bestC.toFixed(3)}% 微調為 ${newC.toFixed(3)}%（${dir}濃度），預期可將色差 ΔE00 由 ${bestDE.toFixed(2)} 降至約 ${deNew.toFixed(2)}。`;
-  if(newC<=cmin+1e-6||newC>=cmax-1e-6)tip+=' 註：建議濃度已達數據範圍邊界，超出目前實測濃度區間之外插結果，準確度較低，建議補測更高或更低濃度樣本。';
- }
- out.innerHTML=`
- <div class="grid grid-cols-2 gap-4">
-  <div class="border rounded p-3">
-   <div class="font-bold mb-1">內插最佳匹配濃度</div>
-   <div>建議濃度：<span class="font-bold text-indigo-700">${bestC.toFixed(3)}%</span></div>
-   <div>對應 Lab：L ${pBest.L.toFixed(2)} / a ${pBest.a.toFixed(2)} / b ${pBest.b.toFixed(2)}</div>
-   <div>色差 ΔE00：<span class="font-bold ${bestDE<1?'text-green-600':bestDE<2?'text-yellow-600':'text-red-600'}">${bestDE.toFixed(2)}</span></div>
+  <div class="font-bold border-b pb-1 pt-1">第二步：輸入目標與目前打樣數據</div>
+  <div class="grid grid-cols-6 gap-2">
+   <div class="col-span-3"><label class="block text-gray-600">目標色光譜 R (31點)</label>
+   <input id="mtTarR" type="text" class="border p-1 rounded" placeholder="直接複製貼上光譜反射率數據"></div>
+   <div class="col-span-3"><label class="block text-gray-600">目前第一次打樣光譜 R (31點)</label>
+   <input id="mtTrialR" type="text" class="border p-1 rounded" placeholder="與上面同格式"></div>
   </div>
-  <div class="border rounded p-3">
-   <div class="font-bold mb-1">修色（補正）建議</div>
-   <div>${tip}</div>
+
+  <div class="font-bold border-b pb-1 pt-1">第三步：輸入當前打樣配方比例 (以英文逗號或空白分隔)</div>
+  <input id="mtCurrentC" type="text" class="border p-1 rounded w-full" placeholder="例如: 1.5, 0.4, 2.1 (對應上方勾選順序)">
+
+  <div class="flex items-center space-x-2 pt-1">
+   <label class="text-gray-600">修色靈敏度 (阻尼係數)</label>
+   <input id="mtDamping" type="range" min="0.1" max="1.0" step="0.1" value="0.5" class="w-32">
+   <span id="mtDampingVal" class="font-bold text-blue-800">0.5</span>
   </div>
+
+  <button class="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold mt-2" onclick="runMultiMatch()">計算修色補正配方</button>
+  <div id="multiMatchResult" class="mt-2 p-2 bg-gray-50 rounded border min-h-[50px]"></div>
  </div>`;
 }
 
-function computeUnitKS(colorantId){
- const pts=DB.spectra.filter(s=>s.colorant_id===colorantId&&s.bg_type==='white'&&s.R&&s.R.length===31)
-  .map(s=>({c:s.concentration,R:s.R}));
- const unit=new Array(31).fill(0);
- if(pts.length===0)return unit;
- for(let w=0;w<31;w++){
-  let num=0,den=0;
-  for(const p of pts){
-   const R=Math.max(p.R[w],1e-6);
-   const KS=(1-R)*(1-R)/(2*R);
-   num+=p.c*KS;den+=p.c*p.c;
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'mtDamping') {
+    document.getElementById('mtDampingVal').innerText = e.target.value;
   }
-  unit[w]=den>1e-9?num/den:0;
+});
+
+function runMultiMatch(){
+ const out=document.getElementById('multiMatchResult');
+ const chks=Array.from(document.querySelectorAll('input[name="mcol"]:checked')).map(el=>el.value);
+ const tarR=parseSpectralData(document.getElementById('mtTarR').value);
+ const triR=parseSpectralData(document.getElementById('mtTrialR').value);
+ const curC=parseSpectralData(document.getElementById('mtCurrentC').value);
+ const damping=parseFloat(document.getElementById('mtDamping').value)||0.5;
+
+ if(chks.length===0||tarR.length!==31||triR.length!==31||curC.length!==chks.length||tarR.some(isNaN)||triR.some(isNaN)||curC.some(isNaN)){
+  out.innerHTML='<span class="text-red-600 font-bold">錯誤：請確認勾選的色漿數量與輸入的配方個數一致，且光譜數據必須為 31 點。</span>';
+  return;
  }
- return unit;
+
+ const dbData=chks.map(id=>computeUnitKS(id));
+ const adjustment=new Array(chks.length).fill(0);
+
+ for(let i=0;i<chks.length;i++){
+  let diffSum=0;
+  for(let w=0;w<31;w++){
+   const dR=tarR[w]-triR[w];
+   diffSum+=dR*dbData[i].K[w]*damping;
+  }
+  adjustment[i]=diffSum;
+ }
+
+ let html='<div class="font-bold text-blue-900 mb-1">複方修色加料建議：</div>';
+ chks.forEach((id,i)=>{
+  const col=DB.colorants.find(c=>c.id===id);
+  const name=col?col.name:id;
+  const action=adjustment[i]>=0?'<span class="text-red-600 font-bold">追加</span>':'<span class="text-green-600 font-bold">減少</span>';
+  const absVal=Math.abs(adjustment[i]);
+  const finalC=Math.max(0,curC[i]+adjustment[i]);
+  html+=`<div>${name}：目前 ${curC[i]}% → 建議 ${action} ${absVal.toFixed(3)}% → 調整後新配方應為 <span class="underline font-bold">${finalC.toFixed(3)}%</span></div>`;
+ });
+
+ out.innerHTML=html;
+}
+
+function computeUnitKS(colorantId){
+ const specs=DB.spectra.filter(s=>s.colorant_id===colorantId&&s.R&&s.R.length===31);
+ const unitK=new Array(31).fill(0);
+ const unitS=new Array(31).fill(0);
+ const concs=[...new Set(specs.map(s=>s.concentration))];
+ if(concs.length===0)return {K:unitK,S:unitS};
+ for(let w=0;w<31;w++){
+  let numK=0,numS=0,den=0;
+  concs.forEach(c=>{
+   const wSpec=specs.find(s=>s.concentration===c&&s.bg_type==='white');
+   const bSpec=specs.find(s=>s.concentration===c&&s.bg_type==='black');
+   if(wSpec&&bSpec){
+    const Rw=Math.max(wSpec.R[w],1e-4);
+    const Rb=Math.max(bSpec.R[w],1e-4);
+    const a=0.5*(Rw+(Rb-Rw+1)/Rb);
+    const b=Math.sqrt(Math.max(a*a-1,0));
+    const S_conc=(b>0)?(1/b)*Math.log((1-Rb*(a-b))/(1-Rb*(a+b))):0;
+    const K_conc=S_conc*(a-1);
+    numK+=c*K_conc;numS+=c*S_conc;den+=c*c;
+   }
+  });
+  unitK[w]=den>1e-9?numK/den:0;
+  unitS[w]=den>1e-9?numS/den:0;
+ }
+ return {K:unitK,S:unitS};
 }
 
 function predictRecipe(colorantIds,targetR,maxTotal){
  maxTotal=maxTotal||10;
  const n=colorantIds.length;
- const A=colorantIds.map(id=>computeUnitKS(id));
- const targetKS=targetR.map(R=>{R=Math.max(R,1e-6);return (1-R)*(1-R)/(2*R);});
- let C=new Array(n).fill(0);
- let normSq=0;
- for(let w=0;w<31;w++)for(let i=0;i<n;i++)normSq+=A[i][w]*A[i][w];
- const lr=normSq>1e-9?1/normSq:0.001;
- const iters=3000;
+ const dbData=colorantIds.map(id=>computeUnitKS(id));
+ const K_sub=new Array(31).fill(0.01);
+ const S_sub=new Array(31).fill(1.0);
+ const targetKS=targetR.map(R=>{R=Math.max(R,1e-4);return (1-R)*(1-R)/(2*R);});
+ let C=new Array(n).fill(0.1);
+ const lr=0.005;
+ const iters=2000;
  for(let it=0;it<iters;it++){
   const resid=new Array(31);
   for(let w=0;w<31;w++){
-   let pred=0;
-   for(let i=0;i<n;i++)pred+=C[i]*A[i][w];
-   resid[w]=pred-targetKS[w];
-  }
-  const grad=new Array(n).fill(0);
-  for(let i=0;i<n;i++){
-   let g=0;
-   for(let w=0;w<31;w++)g+=A[i][w]*resid[w];
-   grad[i]=g;
+   let sumK=K_sub[w],sumS=S_sub[w];
+   for(let i=0;i<n;i++){sumK+=C[i]*dbData[i].K[w];sumS+=C[i]*dbData[i].S[w];}
+   const predKS=sumS>1e-9?sumK/sumS:0;
+   resid[w]=predKS-targetKS[w];
   }
   for(let i=0;i<n;i++){
-   C[i]-=lr*grad[i];
+   let grad=0;
+   for(let w=0;w<31;w++)grad+=dbData[i].K[w]*resid[w];
+   C[i]-=lr*grad;
    if(C[i]<0)C[i]=0;
   }
   const sum=C.reduce((a,b)=>a+b,0);
@@ -313,13 +338,14 @@ function predictRecipe(colorantIds,targetR,maxTotal){
  }
  return colorantIds.map((id,i)=>{
   const col=DB.colorants.find(c=>c.id===id);
-  return {id,name:col?col.name:id,percent:Math.round(C[i]*100)/100};
+  const rawPercent = Math.round(C[i]*1000)/1000;
+  return {id,name:col?col.name:id,percent:rawPercent >= 0.01 ? rawPercent : 0};
  });
 }
 
 function tabRecipe(){
  return `
- <div class="mb-2">目標光譜 R(400-700nm,31點,逗號分隔)</div>
+ <div class="mb-2">目標光譜 R(400-700nm,31點,貼上或空白分隔均可)</div>
  <input id="trSpec" type="text" class="border p-1 rounded w-full mb-2">
  <div class="flex items-center space-x-2 mb-2">
   <label>總濃度上限%</label><input id="trMax" type="number" value="10" class="border p-1 rounded w-24">
@@ -329,10 +355,10 @@ function tabRecipe(){
 }
 
 function runRecipePredict(){
- const raw=document.getElementById('trSpec').value.trim();
- const R=raw.split(',').map(v=>parseFloat(v.trim()));
+ const raw=document.getElementById('trSpec').value;
+ const R=parseSpectralData(raw);
  const out=document.getElementById('recipeResult');
- if(R.length!==31||R.some(isNaN)){out.innerHTML='<div class="text-red-600">請輸入31個目標波長反射率(逗號分隔)</div>';return;}
+ if(R.length!==31||R.some(isNaN)){out.innerHTML='<div class="text-red-600">請輸入 31 個目標波長反射率</div>';return;}
  const maxTotal=parseFloat(document.getElementById('trMax').value)||10;
  const ids=DB.colorants.map(c=>c.id);
  if(ids.length===0){out.innerHTML='<div class="text-red-600">尚無色漿資料</div>';return;}
@@ -344,30 +370,16 @@ window.render=render;
 window.addColorant=addColorant;
 window.delColorant=delColorant;
 window.saveRow=saveRow;
-window.runMatch=runMatch;
+window.runMultiMatch=runMultiMatch;
 window.runRecipePredict=runRecipePredict;
 window.ui=ui;
 
-const APP_PASSWORD='123456abc';
-function showApp(){
- document.getElementById('loginScreen').classList.add('hidden');
- document.getElementById('app').classList.remove('hidden');
+window.__appInit=function(){
  try{DB=JSON.parse(localStorage.getItem('cms_db'))||DB}catch(e){}
  render();
- initSync();
-}
-function tryLogin(){
- const v=document.getElementById('pwInput').value;
- if(v===APP_PASSWORD){
-  sessionStorage.setItem('cms_auth','1');
-  showApp();
- }else{
-  document.getElementById('pwErr').classList.remove('hidden');
- }
-}
-window.tryLogin=tryLogin;
-
-if(sessionStorage.getItem('cms_auth')==='1')showApp();
+ try{initSync()}catch(e){console.error('雲端同步啟動失敗',e)}
+};
+if(sessionStorage.getItem('cms_auth')==='1')window.__appInit();
 </script>
 </body>
 </html>
