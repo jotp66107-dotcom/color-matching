@@ -91,7 +91,16 @@ function deltaE00(L1,a1,b1,L2,a2,b2){
 function render(){
  const app=document.getElementById('app');
  app.innerHTML=`
- <div class="flex justify-end text-gray-500 mb-1">💾 本地儲存 (瀏覽器 localStorage)</div>
+ <div class="flex justify-between items-center mb-1">
+  <div class="text-gray-500">💾 本地儲存 (瀏覽器 localStorage)</div>
+  <div class="space-x-2">
+   <button class="bg-gray-700 text-white px-3 py-1 rounded" onclick="exportData()">匯出備份 (JSON)</button>
+   <label class="bg-gray-500 text-white px-3 py-1 rounded cursor-pointer inline-block">
+    匯入備份
+    <input type="file" accept="application/json" class="hidden" onchange="importData(event)">
+   </label>
+  </div>
+ </div>
  <div class="flex space-x-1">
   <div class="tab ${ui.tab==='a'?'tabA':'tabI'}" onclick="ui.tab='a';render()">1. 色漿與批號</div>
   <div class="tab ${ui.tab==='b'?'tabA':'tabI'}" onclick="ui.tab='b';render()">2. 數據錄入</div>
@@ -99,6 +108,50 @@ function render(){
   <div class="tab ${ui.tab==='d'?'tabA':'tabI'}" onclick="ui.tab='d';render()">4. 自動配方預測</div>
  </div>
  <div class="bg-white p-4 rounded-b-lg rounded-tr-lg shadow">${ui.tab==='a'?tabColorant():ui.tab==='b'?tabData():ui.tab==='c'?tabMatch():tabRecipe()}</div>`;
+}
+
+function exportData(){
+ const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ const ts=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+ a.href=url;
+ a.download=`色漿配色資料備份_${ts}.json`;
+ document.body.appendChild(a);
+ a.click();
+ document.body.removeChild(a);
+ URL.revokeObjectURL(url);
+}
+
+function importData(event){
+ const file=event.target.files[0];
+ if(!file)return;
+ const reader=new FileReader();
+ reader.onload=e=>{
+  try{
+   const data=JSON.parse(e.target.result);
+   if(!data||!Array.isArray(data.colorants)||!Array.isArray(data.spectra)){
+    alert('檔案格式不正確，找不到 colorants 或 spectra 欄位');
+    return;
+   }
+   const mode=confirm('按「確定」= 覆蓋目前所有資料\n按「取消」= 合併到目前資料(保留現有色漿，新增匯入的資料)');
+   if(mode){
+    DB=data;
+   }else{
+    const existIds=new Set(DB.colorants.map(c=>c.id));
+    data.colorants.forEach(c=>{if(!existIds.has(c.id))DB.colorants.push(c)});
+    const existSpecIds=new Set(DB.spectra.map(s=>s.id));
+    data.spectra.forEach(s=>{if(!existSpecIds.has(s.id))DB.spectra.push(s)});
+   }
+   ui.activeId=null;
+   save();render();
+   alert('匯入完成');
+  }catch(err){
+   alert('讀取檔案失敗，請確認是先前匯出的 JSON 備份檔');
+  }
+  event.target.value='';
+ };
+ reader.readAsText(file);
 }
 
 function tabColorant(){
