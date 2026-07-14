@@ -36,7 +36,7 @@ function tryLogin(){
   if(window.__appInit){
    window.__appInit();
   }else{
-   document.getElementById('app').innerHTML='<div class="p-4 text-red-600">系統模組尚未載入完成或雲端連線失敗，請稍候或重新整理頁面。若持續發生，請確認網路可連線至 Firebase。</div>';
+   document.getElementById('app').innerHTML='<div class="p-4 text-red-600">系統模組尚未載入完成，請重新整理頁面。</div>';
   }
  }else{
   document.getElementById('pwErr').classList.remove('hidden');
@@ -47,50 +47,21 @@ if(sessionStorage.getItem('cms_auth')==='1'){
  document.getElementById('app').classList.remove('hidden');
 }
 </script>
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js";
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBHoR66Q4aLY1Qk3ShHnApipnff4TMQEnQ",
-  authDomain: "color-matching-95057.firebaseapp.com",
-  projectId: "color-matching-95057",
-  storageBucket: "color-matching-95057.firebasestorage.app",
-  messagingSenderId: "42229636253",
-  appId: "1:42229636253:web:92fdef7d4ee467e5f3c874",
-  measurementId: "G-D4ETMME5FY"
-};
-const fbApp=initializeApp(firebaseConfig);
-try{getAnalytics(fbApp)}catch(e){console.warn('Analytics 初始化失敗，不影響其他功能',e)}
-const db=getFirestore(fbApp);
-const colRef=collection(db,'colorants');
-const specRef=collection(db,'spectra');
-
+<script>
 const CONCS=[0.2,0.5,1,3,5];
 const BGS=[["white","白底"],["black","黑底"]];
 const WL=Array.from({length:31},(_,i)=>400+i*10);
 let DB={colorants:[],spectra:[]};
-let ui={tab:'a',activeId:null,synced:false};
+let ui={tab:'a',activeId:null};
 
 function uid(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
-function cacheSave(){try{localStorage.setItem('cms_db',JSON.stringify(DB))}catch(e){}}
+function load(){try{DB=JSON.parse(localStorage.getItem('cms_db'))||{colorants:[],spectra:[]}}catch(e){DB={colorants:[],spectra:[]}}}
+function save(){try{localStorage.setItem('cms_db',JSON.stringify(DB))}catch(e){alert('本地儲存空間已滿或寫入失敗，請清除部分資料')}}
 function getSpec(cid,conc,bg){return DB.spectra.find(s=>s.colorant_id===cid&&s.concentration===conc&&s.bg_type===bg)}
 
 function parseSpectralData(str) {
   if (!str) return [];
   return str.trim().split(/[\s,\t\r\n]+/).map(v => parseFloat(v)).filter(v => !isNaN(v));
-}
-
-function initSync(){
- onSnapshot(colRef,snap=>{
-  DB.colorants=snap.docs.map(d=>({id:d.id,...d.data()}));
-  ui.synced=true;cacheSave();render();
- });
- onSnapshot(specRef,snap=>{
-  DB.spectra=snap.docs.map(d=>({id:d.id,...d.data()}));
-  cacheSave();render();
- });
 }
 
 function deltaE00(L1,a1,b1,L2,a2,b2){
@@ -120,7 +91,7 @@ function deltaE00(L1,a1,b1,L2,a2,b2){
 function render(){
  const app=document.getElementById('app');
  app.innerHTML=`
- <div class="flex justify-end text-gray-500 mb-1">${ui.synced?'☁ 已同步至雲端':'☁ 連線中...'}</div>
+ <div class="flex justify-end text-gray-500 mb-1">💾 本地儲存 (瀏覽器 localStorage)</div>
  <div class="flex space-x-1">
   <div class="tab ${ui.tab==='a'?'tabA':'tabI'}" onclick="ui.tab='a';render()">1. 色漿與批號</div>
   <div class="tab ${ui.tab==='b'?'tabA':'tabI'}" onclick="ui.tab='b';render()">2. 數據錄入</div>
@@ -148,21 +119,20 @@ function tabColorant(){
   <tbody>${rows||'<tr><td colspan=4 class="text-gray-400 py-2">尚無色漿，請先新增</td></tr>'}</tbody></table>`;
 }
 
-async function addColorant(){
+function addColorant(){
  const name=document.getElementById('ncName').value.trim();
  const lot=document.getElementById('ncLot').value.trim();
  if(!name)return alert('請輸入色漿名稱');
  const id=uid('col_');
- ui.activeId=id;
- await setDoc(doc(colRef,id),{name,lot_number:lot});
+ DB.colorants.push({id,name,lot_number:lot});
+ ui.activeId=id;save();render();
 }
-async function delColorant(id){
+function delColorant(id){
  if(!confirm('確定刪除此色漿及其所有數據？'))return;
+ DB.colorants=DB.colorants.filter(c=>c.id!==id);
+ DB.spectra=DB.spectra.filter(s=>s.colorant_id!==id);
  if(ui.activeId===id)ui.activeId=null;
- await deleteDoc(doc(colRef,id));
- const q=query(specRef,where('colorant_id','==',id));
- const snap=await getDocs(q);
- for(const d of snap.docs)await deleteDoc(d.ref);
+ save();render();
 }
 
 function tabData(){
@@ -188,7 +158,7 @@ function tabData(){
  <tbody>${rows}</tbody></table>`;
 }
 
-async function saveRow(conc,bg){
+function saveRow(conc,bg){
  const rid=`${conc}_${bg}`;
  const L=parseFloat(document.getElementById(`L_${rid}`).value);
  const a=parseFloat(document.getElementById(`a_${rid}`).value);
@@ -198,9 +168,9 @@ async function saveRow(conc,bg){
  if(Rraw && R.length!==31)return alert('反射率須為 31 個數值 (400-700nm，10nm 間隔)');
  if(isNaN(L)||isNaN(a)||isNaN(b))return alert('請輸入完整的 L a b 數值');
  let rec=getSpec(ui.activeId,conc,bg);
- const id=rec?rec.id:uid('sd_');
- await setDoc(doc(specRef,id),{colorant_id:ui.activeId,concentration:conc,bg_type:bg,L,a,b,R});
- alert('已儲存並同步至雲端');
+ if(!rec){rec={id:uid('sd_'),colorant_id:ui.activeId,concentration:conc,bg_type:bg};DB.spectra.push(rec);}
+ rec.L=L;rec.a=a;rec.b=b;rec.R=R;
+ save();alert('已儲存至本地');
 }
 
 function tabMatch(){
@@ -366,18 +336,9 @@ function runRecipePredict(){
  out.innerHTML=res.map(r=>`<div>${r.name}：<span class="font-bold text-indigo-700">${r.percent}%</span></div>`).join('');
 }
 
-window.render=render;
-window.addColorant=addColorant;
-window.delColorant=delColorant;
-window.saveRow=saveRow;
-window.runMultiMatch=runMultiMatch;
-window.runRecipePredict=runRecipePredict;
-window.ui=ui;
-
 window.__appInit=function(){
- try{DB=JSON.parse(localStorage.getItem('cms_db'))||DB}catch(e){}
+ load();
  render();
- try{initSync()}catch(e){console.error('雲端同步啟動失敗',e)}
 };
 if(sessionStorage.getItem('cms_auth')==='1')window.__appInit();
 </script>
