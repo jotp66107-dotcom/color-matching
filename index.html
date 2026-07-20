@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>分光光度儀對色系統</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 body{font-family:-apple-system,"Noto Sans TC",sans-serif}
 input[type=number],input[type=text]{width:100%}
@@ -48,8 +49,6 @@ if(sessionStorage.getItem('cms_auth')==='1'){
 }
 </script>
 <script>
-const CONCS=[0.2,0.5,1,3,5];
-const BGS=[["white","白底"],["black","黑底"]];
 const WL=Array.from({length:31},(_,i)=>400+i*10);
 let DB={colorants:[],spectra:[]};
 let ui={tab:'a',activeId:null};
@@ -57,7 +56,6 @@ let ui={tab:'a',activeId:null};
 function uid(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function load(){try{DB=JSON.parse(localStorage.getItem('cms_db'))||{colorants:[],spectra:[]}}catch(e){DB={colorants:[],spectra:[]}}}
 function save(){try{localStorage.setItem('cms_db',JSON.stringify(DB))}catch(e){alert('本地儲存空間已滿或寫入失敗，請清除部分資料')}}
-function getSpec(cid,conc,bg){return DB.spectra.find(s=>s.colorant_id===cid&&s.concentration===conc&&s.bg_type===bg)}
 
 function parseSpectralData(str) {
   if (!str) return [];
@@ -92,11 +90,13 @@ function render(){
  const app=document.getElementById('app');
  app.innerHTML=`
  <div class="flex justify-between items-center mb-1">
-  <div class="text-gray-500">💾 本地儲存 (瀏覽器 localStorage)</div>
+  <div class="text-gray-500">💾 本地儲存已就緒</div>
   <div class="space-x-2">
-   <button class="bg-gray-700 text-white px-3 py-1 rounded" onclick="exportData()">匯出備份 (JSON)</button>
+   <button class="bg-teal-700 text-white px-3 py-1 rounded" onclick="document.getElementById('xlsxInput').click()">上傳採樣紀錄 (Excel)</button>
+   <input id="xlsxInput" type="file" accept=".xlsx,.xls" class="hidden" onchange="importExcelSampling(event)">
+   <button class="bg-gray-700 text-white px-3 py-1 rounded" onclick="exportData()">導出備份 (JSON)</button>
    <label class="bg-gray-500 text-white px-3 py-1 rounded cursor-pointer inline-block">
-    匯入備份
+    導入備份 (JSON)
     <input type="file" accept="application/json" class="hidden" onchange="importData(event)">
    </label>
   </div>
@@ -110,13 +110,73 @@ function render(){
  <div class="bg-white p-4 rounded-b-lg rounded-tr-lg shadow">${ui.tab==='a'?tabColorant():ui.tab==='b'?tabData():ui.tab==='c'?tabMatch():tabRecipe()}</div>`;
 }
 
+function importExcelSampling(event){
+ const file=event.target.files[0];
+ if(!file)return;
+ const reader=new FileReader();
+ reader.onload=e=>{
+  try{
+   const wb=XLSX.read(e.target.result,{type:'array'});
+   const sheetName=wb.SheetNames[0];
+   const sheet=wb.Sheets[sheetName];
+   const rows=XLSX.utils.sheet_to_json(sheet,{defval:null});
+   let addedColorants=0,writtenRows=0,skipped=0;
+   rows.forEach(row=>{
+    const code=row['色漿編號'];
+    const sample=row['樣本編號'];
+    const concRaw=row['色漿濃度'];
+    if(code===null||code===undefined||String(code).trim()===''){skipped++;return;}
+    if(!sample){skipped++;return;}
+    const sampleStr=String(sample);
+    let bg=null;
+    if(sampleStr.includes('黑卡'))bg='black';
+    else if(sampleStr.includes('白卡'))bg='white';
+    if(!bg){skipped++;return;}
+    const conc=parseFloat(concRaw);
+    if(isNaN(conc)){skipped++;return;}
+    const L=parseFloat(row['L']);
+    const Cc=parseFloat(row['C']);
+    const H=parseFloat(row['H']);
+    if(isNaN(L)||isNaN(Cc)||isNaN(H)){skipped++;return;}
+    const rad=H*Math.PI/180;
+    const a=Cc*Math.cos(rad);
+    const b=Cc*Math.sin(rad);
+    const R=[];
+    for(let wl=400;wl<=700;wl+=10)R.push(parseFloat(row['R'+wl])||0);
+    const name=String(code).trim();
+    let col=DB.colorants.find(c=>c.name===name);
+    if(!col){
+     col={id:uid('col_'),name,lot_number:''};
+     DB.colorants.push(col);
+     addedColorants++;
+    }
+    let rec=DB.spectra.find(s=>s.colorant_id===col.id&&s.concentration===conc&&s.bg_type===bg);
+    if(!rec){
+     rec={id:uid('sd_'),colorant_id:col.id,concentration:conc,bg_type:bg};
+     DB.spectra.push(rec);
+    }
+    rec.L=L;rec.a=a;rec.b=b;rec.R=R;
+    writtenRows++;
+   });
+   save();
+   ui.tab='a';
+   render();
+   alert('匯入完成\n新增色漿：'+addedColorants+' 個\n寫入光譜紀錄：'+writtenRows+' 筆\n略過（無法辨識或缺值）：'+skipped+' 筆\n\n濃度數值已直接採用檔案內「色漿濃度」欄位的實際數值。');
+  }catch(err){
+   console.error(err);
+   alert('讀取失敗，請確認上傳的是正確格式的採樣紀錄 Excel 檔');
+  }
+  event.target.value='';
+ };
+ reader.readAsArrayBuffer(file);
+}
+
 function exportData(){
  const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
  const url=URL.createObjectURL(blob);
  const a=document.createElement('a');
- const ts=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
  a.href=url;
- a.download=`色漿配色資料備份_${ts}.json`;
+ a.download='color_matching_backup.json';
  document.body.appendChild(a);
  a.click();
  document.body.removeChild(a);
@@ -191,39 +251,63 @@ function delColorant(id){
 function tabData(){
  if(!ui.activeId)return '<div class="text-gray-400">請先於「色漿與批號」頁選擇一個色漿</div>';
  const col=DB.colorants.find(c=>c.id===ui.activeId);
- let rows='';
- for(const bg of BGS)for(const c of CONCS){
-  const rec=getSpec(ui.activeId,c,bg[0])||{};
-  const rid=`${c}_${bg[0]}`;
+ const recs=DB.spectra.filter(s=>s.colorant_id===ui.activeId)
+  .sort((x,y)=>x.bg_type===y.bg_type?(x.concentration-y.concentration):(x.bg_type<y.bg_type?-1:1));
+ let rows=recs.map(rec=>{
   const rStr=(rec.R||[]).join(',');
-  rows+=`<tr class="border-b">
-   <td>${c}%</td><td>${bg[1]}</td>
-   <td><input id="L_${rid}" type="number" step="0.01" value="${rec.L??''}"></td>
-   <td><input id="a_${rid}" type="number" step="0.01" value="${rec.a??''}"></td>
-   <td><input id="b_${rid}" type="number" step="0.01" value="${rec.b??''}"></td>
-   <td><input id="R_${rid}" type="text" placeholder="貼上 31 點光譜反射率 (支援空白、Tab 或逗號分隔)" value="${rStr}"></td>
-   <td><button class="bg-green-600 text-white px-2 rounded" onclick="saveRow(${c},'${bg[0]}')">儲存</button></td>
+  return `<tr class="border-b">
+   <td><input id="C_${rec.id}" type="number" step="0.0001" value="${rec.concentration??''}" class="w-20"></td>
+   <td><select id="BG_${rec.id}" class="border p-1 rounded">
+    <option value="white" ${rec.bg_type==='white'?'selected':''}>白底</option>
+    <option value="black" ${rec.bg_type==='black'?'selected':''}>黑底</option>
+   </select></td>
+   <td><input id="L_${rec.id}" type="number" step="0.01" value="${rec.L??''}"></td>
+   <td><input id="a_${rec.id}" type="number" step="0.01" value="${rec.a??''}"></td>
+   <td><input id="b_${rec.id}" type="number" step="0.01" value="${rec.b??''}"></td>
+   <td><input id="R_${rec.id}" type="text" placeholder="貼上 31 點光譜反射率 (支援空白、Tab 或逗號分隔)" value="${rStr}"></td>
+   <td class="whitespace-nowrap">
+    <button class="bg-green-600 text-white px-2 rounded" onclick="saveDataRow('${rec.id}')">儲存</button>
+    <button class="text-red-600" onclick="deleteDataRow('${rec.id}')">刪除</button>
+   </td>
   </tr>`;
- }
+ }).join('');
  return `<div class="mb-2 font-bold">目前色漿：${col.name} (批號 ${col.lot_number||'-'})</div>
+ <div class="mb-2 space-x-2">
+  <button class="bg-blue-600 text-white px-2 py-1 rounded" onclick="addDataRow('white')">+ 新增白底濃度紀錄</button>
+  <button class="bg-gray-800 text-white px-2 py-1 rounded" onclick="addDataRow('black')">+ 新增黑底濃度紀錄</button>
+ </div>
  <table class="w-full border-collapse"><thead><tr class="border-b font-bold">
- <th>濃度</th><th>底色</th><th>L</th><th>a</th><th>b</th><th>反射率 R(400-700nm,31點)</th><th></th></tr></thead>
- <tbody>${rows}</tbody></table>`;
+ <th>濃度(%)</th><th>底色</th><th>L</th><th>a</th><th>b</th><th>反射率 R(400-700nm,31點)</th><th></th></tr></thead>
+ <tbody>${rows||'<tr><td colspan=7 class="text-gray-400 py-2">尚無數據，請按上方按鈕新增</td></tr>'}</tbody></table>`;
 }
 
-function saveRow(conc,bg){
- const rid=`${conc}_${bg}`;
- const L=parseFloat(document.getElementById(`L_${rid}`).value);
- const a=parseFloat(document.getElementById(`a_${rid}`).value);
- const b=parseFloat(document.getElementById(`b_${rid}`).value);
- const Rraw=document.getElementById(`R_${rid}`).value;
- let R=parseSpectralData(Rraw);
+function addDataRow(bg){
+ if(!ui.activeId)return;
+ const rec={id:uid('sd_'),colorant_id:ui.activeId,concentration:0,bg_type:bg,L:0,a:0,b:0,R:[]};
+ DB.spectra.push(rec);
+ save();render();
+}
+
+function saveDataRow(id){
+ const rec=DB.spectra.find(s=>s.id===id);
+ if(!rec)return;
+ const conc=parseFloat(document.getElementById(`C_${id}`).value);
+ const bg=document.getElementById(`BG_${id}`).value;
+ const L=parseFloat(document.getElementById(`L_${id}`).value);
+ const a=parseFloat(document.getElementById(`a_${id}`).value);
+ const b=parseFloat(document.getElementById(`b_${id}`).value);
+ const Rraw=document.getElementById(`R_${id}`).value;
+ const R=parseSpectralData(Rraw);
  if(Rraw && R.length!==31)return alert('反射率須為 31 個數值 (400-700nm，10nm 間隔)');
- if(isNaN(L)||isNaN(a)||isNaN(b))return alert('請輸入完整的 L a b 數值');
- let rec=getSpec(ui.activeId,conc,bg);
- if(!rec){rec={id:uid('sd_'),colorant_id:ui.activeId,concentration:conc,bg_type:bg};DB.spectra.push(rec);}
- rec.L=L;rec.a=a;rec.b=b;rec.R=R;
+ if(isNaN(conc)||isNaN(L)||isNaN(a)||isNaN(b))return alert('請輸入完整的濃度與 L a b 數值');
+ rec.concentration=conc;rec.bg_type=bg;rec.L=L;rec.a=a;rec.b=b;rec.R=R;
  save();alert('已儲存至本地');
+}
+
+function deleteDataRow(id){
+ if(!confirm('確定刪除此筆濃度紀錄？'))return;
+ DB.spectra=DB.spectra.filter(s=>s.id!==id);
+ save();render();
 }
 
 function tabMatch(){
@@ -247,10 +331,16 @@ function tabMatch(){
   <div class="font-bold border-b pb-1 pt-1">第三步：輸入當前打樣配方比例 (以英文逗號或空白分隔)</div>
   <input id="mtCurrentC" type="text" class="border p-1 rounded w-full" placeholder="例如: 1.5, 0.4, 2.1 (對應上方勾選順序)">
 
-  <div class="flex items-center space-x-2 pt-1">
-   <label class="text-gray-600">修色靈敏度 (阻尼係數)</label>
-   <input id="mtDamping" type="range" min="0.1" max="1.0" step="0.1" value="0.5" class="w-32">
-   <span id="mtDampingVal" class="font-bold text-blue-800">0.5</span>
+  <div class="grid grid-cols-2 gap-2 pt-1">
+   <div class="flex items-center space-x-2">
+    <label class="text-gray-600 whitespace-nowrap">目前桶內油漆剩餘重量 (g)</label>
+    <input id="mtBucketWeight" type="number" value="1000" class="border p-1 rounded">
+   </div>
+   <div class="flex items-center space-x-2">
+    <label class="text-gray-600 whitespace-nowrap">修色靈敏度 (阻尼係數)</label>
+    <input id="mtDamping" type="range" min="0.1" max="1.0" step="0.1" value="0.5" class="w-32">
+    <span id="mtDampingVal" class="font-bold text-blue-800">0.5</span>
+   </div>
   </div>
 
   <button class="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold mt-2" onclick="runMultiMatch()">計算修色補正配方</button>
@@ -271,6 +361,7 @@ function runMultiMatch(){
  const triR=parseSpectralData(document.getElementById('mtTrialR').value);
  const curC=parseSpectralData(document.getElementById('mtCurrentC').value);
  const damping=parseFloat(document.getElementById('mtDamping').value)||0.5;
+ const bucketWeight=parseFloat(document.getElementById('mtBucketWeight').value)||1000;
 
  if(chks.length===0||tarR.length!==31||triR.length!==31||curC.length!==chks.length||tarR.some(isNaN)||triR.some(isNaN)||curC.some(isNaN)){
   out.innerHTML='<span class="text-red-600 font-bold">錯誤：請確認勾選的色漿數量與輸入的配方個數一致，且光譜數據必須為 31 點。</span>';
@@ -289,17 +380,31 @@ function runMultiMatch(){
   adjustment[i]=diffSum;
  }
 
- let html='<div class="font-bold text-blue-900 mb-1">複方修色加料建議：</div>';
+ let rowsHtml='';
  chks.forEach((id,i)=>{
   const col=DB.colorants.find(c=>c.id===id);
   const name=col?col.name:id;
   const action=adjustment[i]>=0?'<span class="text-red-600 font-bold">追加</span>':'<span class="text-green-600 font-bold">減少</span>';
   const absVal=Math.abs(adjustment[i]);
   const finalC=Math.max(0,curC[i]+adjustment[i]);
-  html+=`<div>${name}：目前 ${curC[i]}% → 建議 ${action} ${absVal.toFixed(3)}% → 調整後新配方應為 <span class="underline font-bold">${finalC.toFixed(3)}%</span></div>`;
+  const gramCell=adjustment[i]>=0?`<span class="font-bold text-red-600">${(absVal/100*bucketWeight).toFixed(2)} g</span>`:'<span class="text-gray-500">不需加 (原配比偏多)</span>';
+  rowsHtml+=`<tr class="border-b">
+   <td>${name}</td>
+   <td>${curC[i]}%</td>
+   <td>${action} ${absVal.toFixed(3)}%</td>
+   <td class="font-bold">${finalC.toFixed(3)}%</td>
+   <td>${gramCell}</td>
+  </tr>`;
  });
 
- out.innerHTML=html;
+ out.innerHTML=`
+ <div class="font-bold text-blue-900 mb-2">複方修色加料建議 (依目前桶內剩餘 ${bucketWeight} g 換算)：</div>
+ <table class="w-full border-collapse">
+  <thead><tr class="border-b font-bold">
+   <th>色漿</th><th>目前配比</th><th>建議調整</th><th>調整後配比</th><th>電子秤追加克數</th>
+  </tr></thead>
+  <tbody>${rowsHtml}</tbody>
+ </table>`;
 }
 
 function computeUnitKS(colorantId){
@@ -370,8 +475,13 @@ function tabRecipe(){
  return `
  <div class="mb-2">目標光譜 R(400-700nm,31點,貼上或空白分隔均可)</div>
  <input id="trSpec" type="text" class="border p-1 rounded w-full mb-2">
- <div class="flex items-center space-x-2 mb-2">
-  <label>總濃度上限%</label><input id="trMax" type="number" value="10" class="border p-1 rounded w-24">
+ <div class="flex items-center space-x-4 mb-2">
+  <div class="flex items-center space-x-2">
+   <label class="whitespace-nowrap">總濃度上限%</label><input id="trMax" type="number" value="10" class="border p-1 rounded w-24">
+  </div>
+  <div class="flex items-center space-x-2">
+   <label class="whitespace-nowrap">預計調配總重量 (g)</label><input id="trWeight" type="number" value="1000" class="border p-1 rounded w-28">
+  </div>
   <button class="bg-indigo-600 text-white px-4 py-1 rounded" onclick="runRecipePredict()">預測配方</button>
  </div>
  <div id="recipeResult" class="mt-2"></div>`;
@@ -383,10 +493,33 @@ function runRecipePredict(){
  const out=document.getElementById('recipeResult');
  if(R.length!==31||R.some(isNaN)){out.innerHTML='<div class="text-red-600">請輸入 31 個目標波長反射率</div>';return;}
  const maxTotal=parseFloat(document.getElementById('trMax').value)||10;
+ const totalWeight=parseFloat(document.getElementById('trWeight').value)||1000;
  const ids=DB.colorants.map(c=>c.id);
  if(ids.length===0){out.innerHTML='<div class="text-red-600">尚無色漿資料</div>';return;}
  const res=predictRecipe(ids,R,maxTotal);
- out.innerHTML=res.map(r=>`<div>${r.name}：<span class="font-bold text-indigo-700">${r.percent}%</span></div>`).join('');
+ let colorantWeightSum=0;
+ const rowsHtml=res.map(r=>{
+  const g=(r.percent/100)*totalWeight;
+  colorantWeightSum+=g;
+  return `<tr class="border-b">
+   <td>${r.name}</td>
+   <td class="font-bold text-indigo-700">${r.percent}%</td>
+   <td class="font-bold">${g.toFixed(2)} g</td>
+  </tr>`;
+ }).join('');
+ const baseWeight=Math.max(0,totalWeight-colorantWeightSum);
+ out.innerHTML=`
+ <table class="w-full border-collapse">
+  <thead><tr class="border-b font-bold"><th>色漿</th><th>建議配比</th><th>實際秤重 (g)</th></tr></thead>
+  <tbody>${rowsHtml}
+   <tr class="border-b bg-gray-50">
+    <td class="font-bold">主體基料</td>
+    <td class="text-gray-500">-</td>
+    <td class="font-bold">${baseWeight.toFixed(2)} g</td>
+   </tr>
+  </tbody>
+ </table>
+ <div class="mt-2 text-gray-600">總重量：${totalWeight} g　（色漿合計 ${colorantWeightSum.toFixed(2)} g ＋ 基料 ${baseWeight.toFixed(2)} g）</div>`;
 }
 
 window.__appInit=function(){
