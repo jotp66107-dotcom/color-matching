@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>0.1mm 色彩色漿自動配色與驗收系統</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
@@ -460,7 +459,7 @@
 
     <div class="panel results" id="chartPanel">
       <p class="chart-title">目標光譜 vs 預測光譜對比 (400nm - 700nm)</p>
-      <div class="chart-wrap"><canvas id="spectrumChart"></canvas></div>
+      <div class="chart-wrap" id="chartWrap"></div>
     </div>
 
     <div class="panel" id="emptyPanel">
@@ -994,6 +993,50 @@ function solveFormulation(pigments, targetLab, maxPigments, filmThickness, Rg, o
   };
 }
 
+// 純 SVG 光譜對比圖（不依賴任何外部圖表函式庫，避免 CDN 載入失敗導致無法顯示）
+function renderSpectrumChart(container, wavelengths, datasets){
+  const width=680, height=320, padL=42, padR=16, padT=14, padB=34;
+  const plotW = width-padL-padR, plotH = height-padT-padB;
+  const n = wavelengths.length;
+  const xScale = i => padL + (n<=1 ? 0 : (i/(n-1))*plotW);
+  const yScale = v => padT + plotH - (Math.max(0,Math.min(100,v))/100)*plotH;
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" style="width:100%; height:100%; font-family:var(--mono);">`;
+
+  for(let g=0; g<=100; g+=20){
+    const y=yScale(g);
+    svg += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width-padR}" y2="${y.toFixed(1)}" stroke="#E1E4E0" stroke-width="1"/>`;
+    svg += `<text x="${padL-8}" y="${(y+3).toFixed(1)}" font-size="10" fill="#9AA1AC" text-anchor="end">${g}</text>`;
+  }
+  wavelengths.forEach((w,i)=>{
+    if (i%3===0 || i===n-1){
+      const x=xScale(i);
+      svg += `<text x="${x.toFixed(1)}" y="${height-padB+16}" font-size="9" fill="#9AA1AC" text-anchor="middle">${w}</text>`;
+    }
+  });
+
+  datasets.forEach(ds=>{
+    const pts = ds.data.map((v,i)=>`${xScale(i).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ');
+    const dashAttr = ds.dash ? ` stroke-dasharray="${ds.dash}"` : '';
+    svg += `<polyline points="${pts}" fill="none" stroke="${ds.color}" stroke-width="2"${dashAttr}/>`;
+    ds.data.forEach((v,i)=>{
+      svg += `<circle cx="${xScale(i).toFixed(1)}" cy="${yScale(v).toFixed(1)}" r="2.4" fill="${ds.color}"><title>${wavelengths[i]}nm: ${v.toFixed(1)}%</title></circle>`;
+    });
+  });
+
+  svg += `<text x="${(padL+plotW/2).toFixed(1)}" y="${height-4}" font-size="11" fill="#5B6472" text-anchor="middle" font-family="var(--sans)">波長 (nm)</text>`;
+  svg += `<text x="12" y="${(padT+plotH/2).toFixed(1)}" font-size="11" fill="#5B6472" text-anchor="middle" font-family="var(--sans)" transform="rotate(-90 12 ${(padT+plotH/2).toFixed(1)})">反射率 (%)</text>`;
+  svg += `</svg>`;
+
+  let legend = '<div style="display:flex; gap:18px; margin-top:10px; font-size:12px; color:var(--ink-soft);">';
+  datasets.forEach(ds=>{
+    legend += `<div style="display:flex; align-items:center; gap:6px;"><span style="width:14px; height:3px; background:${ds.color}; display:inline-block; border-radius:1px;"></span>${ds.label}</div>`;
+  });
+  legend += '</div>';
+
+  container.innerHTML = svg + legend;
+}
+
 /* ============================================================
    UI 邏輯
    ============================================================ */
@@ -1093,6 +1136,9 @@ dbFile.addEventListener('change', (e)=>{
   const reader = new FileReader();
   reader.onload = (evt)=>{
     try{
+      if (typeof XLSX === 'undefined'){
+        throw new Error('Excel 讀取元件（xlsx.js）尚未載入成功，請確認網路連線後重新整理頁面再試一次');
+      }
       const filmThickness = parseFloat(document.getElementById('filmThickness').value)||0.1;
       const workbook = XLSX.read(evt.target.result, {type:'array'});
       const {pigments, warnings} = parseSamplingWorkbook(workbook, filmThickness);
@@ -1124,7 +1170,6 @@ applyCategoryBtn.addEventListener('click', ()=>{
 // 執行配色
 const runBtn = document.getElementById('runBtn');
 const errorBanner = document.getElementById('errorBanner');
-let chartInstance = null;
 
 function showError(msg){
   errorBanner.textContent = msg;
@@ -1208,47 +1253,21 @@ runBtn.addEventListener('click', ()=>{
       gradeBanner.className = 'grade-banner ' + grade.cls;
       gradeBanner.textContent = grade.text;
 
-      // 圖表
-      const ctx = document.getElementById('spectrumChart').getContext('2d');
-      if (chartInstance) chartInstance.destroy();
-
+      // 圖表（純 SVG，無外部相依性）
       const datasets = [{
         label: '預測光譜',
         data: result.predicted_R.map(v=>v*100),
-        borderColor: '#B91C1C',
-        backgroundColor: 'transparent',
-        borderDash: [6,4],
-        pointRadius: 2,
-        tension: 0.15,
+        color: '#B91C1C',
+        dash: '6,4',
       }];
       if (targetR){
         datasets.unshift({
           label: '目標光譜',
           data: targetR.map(v=>v*100),
-          borderColor: '#0F766E',
-          backgroundColor: 'transparent',
-          pointRadius: 2,
-          tension: 0.15,
+          color: '#0F766E',
         });
       }
-
-      chartInstance = new Chart(ctx, {
-        type:'line',
-        data:{ labels: WAVELENGTHS.map(w=>w+'nm'), datasets },
-        options:{
-          responsive:true,
-          maintainAspectRatio:false,
-          interaction:{mode:'index', intersect:false},
-          plugins:{
-            legend:{ labels:{ font:{family:'sans-serif'}, color:'#1F2430' } },
-            title:{ display:false }
-          },
-          scales:{
-            x:{ title:{display:true, text:'波長 (nm)', color:'#5B6472'}, ticks:{color:'#9AA1AC'} },
-            y:{ title:{display:true, text:'反射率 (%)', color:'#5B6472'}, ticks:{color:'#9AA1AC'}, min:0, max:100 }
-          }
-        }
-      });
+      renderSpectrumChart(document.getElementById('chartWrap'), WAVELENGTHS, datasets);
 
       if (!targetR){
         document.querySelector('.chart-title').textContent =
