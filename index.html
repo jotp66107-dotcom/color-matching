@@ -1,532 +1,1287 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>分光光度儀對色系統</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>0.1mm 色彩色漿自動配色與驗收系統</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-body{font-family:-apple-system,"Noto Sans TC",sans-serif}
-input[type=number],input[type=text]{width:100%}
-table td,table th{padding:2px 4px}
-.tab{cursor:pointer;padding:8px 16px;border-radius:6px 6px 0 0}
-.tabA{background:#1e3a5f;color:#fff}
-.tabI{background:#e5e7eb;color:#374151}
+  :root{
+    --bg:#F5F6F3;
+    --panel:#FFFFFF;
+    --ink:#1F2430;
+    --ink-soft:#5B6472;
+    --ink-faint:#9AA1AC;
+    --line:#E1E4E0;
+    --accent:#0F766E;
+    --accent-dark:#0B5A54;
+    --accent-soft:#DCF3F0;
+    --warn:#B45309;
+    --warn-soft:#FDF0DC;
+    --danger:#B91C1C;
+    --danger-soft:#FBE4E2;
+    --good:#15803D;
+    --good-soft:#DFF3E6;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    --spectrum: linear-gradient(90deg,
+      #6B00E8 0%, #4B00FF 8%, #0033FF 16%, #0088FF 24%,
+      #00C2E8 32%, #00E0B8 40%, #00E070 48%, #6BE000 56%,
+      #C8E800 64%, #FFD400 72%, #FF9E00 80%, #FF5A00 88%,
+      #E01300 96%, #A30000 100%);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+  .topbar{
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+  }
+  .spectrum-bar{
+    height:5px;
+    background:var(--spectrum);
+  }
+  .topbar-inner{
+    max-width:1280px;
+    margin:0 auto;
+    padding:22px 28px 20px;
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:.14em;
+    color:var(--accent-dark);
+    text-transform:uppercase;
+    margin:0 0 6px;
+  }
+  h1{
+    font-size:26px;
+    margin:0 0 6px;
+    font-weight:700;
+    letter-spacing:-0.01em;
+  }
+  .subtitle{
+    color:var(--ink-soft);
+    font-size:14px;
+    margin:0;
+  }
+  .layout{
+    max-width:1280px;
+    margin:0 auto;
+    padding:24px 28px 80px;
+    display:grid;
+    grid-template-columns:288px 1fr;
+    gap:24px;
+    align-items:start;
+  }
+  @media (max-width:900px){
+    .layout{grid-template-columns:1fr;}
+  }
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:20px;
+  }
+  .panel + .panel{margin-top:20px;}
+  .panel-title{
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:.04em;
+    color:var(--ink);
+    margin:0 0 4px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .panel-title .dot{
+    width:6px;height:6px;border-radius:50%;background:var(--accent);
+    display:inline-block;
+  }
+  .panel-desc{
+    font-size:12px;
+    color:var(--ink-faint);
+    margin:0 0 14px;
+  }
+  label{
+    display:block;
+    font-size:12px;
+    font-weight:600;
+    color:var(--ink-soft);
+    margin:14px 0 6px;
+  }
+  label:first-of-type{margin-top:0;}
+  input[type="number"], input[type="text"]{
+    width:100%;
+    padding:8px 10px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--ink);
+    background:#FBFBFA;
+  }
+  input[type="number"]:focus, input[type="text"]:focus{
+    outline:2px solid var(--accent-soft);
+    border-color:var(--accent);
+  }
+  .file-drop{
+    border:1.5px dashed var(--line);
+    border-radius:8px;
+    padding:16px;
+    text-align:center;
+    font-size:12px;
+    color:var(--ink-faint);
+    cursor:pointer;
+    background:#FBFBFA;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .file-drop:hover{border-color:var(--accent); background:var(--accent-soft);}
+  .file-drop input{display:none;}
+  .file-status{
+    margin-top:8px;
+    font-size:12px;
+    font-family:var(--mono);
+  }
+  .file-status.ok{color:var(--good);}
+  .file-status.err{color:var(--danger);}
+  .file-status.info{color:var(--ink-faint);}
+  .hint{font-size:11px; color:var(--ink-faint); margin-top:6px; line-height:1.5;}
+
+  .mode-toggle{
+    display:flex;
+    border:1px solid var(--line);
+    border-radius:8px;
+    overflow:hidden;
+    margin-bottom:16px;
+  }
+  .mode-toggle button{
+    flex:1;
+    border:none;
+    background:var(--panel);
+    padding:10px 8px;
+    font-size:13px;
+    font-weight:600;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .mode-toggle button.active{
+    background:var(--accent);
+    color:#fff;
+  }
+
+  .wl-grid{
+    display:grid;
+    grid-template-columns:repeat(6, 1fr);
+    gap:8px;
+  }
+  @media (max-width:640px){
+    .wl-grid{grid-template-columns:repeat(3,1fr);}
+  }
+  .wl-field label{margin:0 0 4px; font-size:10.5px; font-family:var(--mono); color:var(--ink-faint);}
+  .wl-field input{padding:6px 6px; font-size:12px;}
+
+  .lab-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:12px;
+  }
+  .lab-derived{
+    margin-top:10px;
+    font-size:12px;
+    color:var(--ink-soft);
+    font-family:var(--mono);
+    background:#FBFBFA;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:8px 10px;
+  }
+
+  .run-btn{
+    width:100%;
+    margin-top:20px;
+    padding:14px;
+    border:none;
+    border-radius:8px;
+    background:var(--accent);
+    color:#fff;
+    font-size:15px;
+    font-weight:700;
+    letter-spacing:.02em;
+    cursor:pointer;
+    transition:background .15s ease, transform .1s ease;
+  }
+  .run-btn:hover{background:var(--accent-dark);}
+  .run-btn:active{transform:scale(0.995);}
+  .run-btn:disabled{background:var(--ink-faint); cursor:progress;}
+
+  .error-banner{
+    margin-top:14px;
+    padding:10px 12px;
+    border-radius:6px;
+    background:var(--danger-soft);
+    color:var(--danger);
+    font-size:13px;
+    display:none;
+  }
+  .error-banner.show{display:block;}
+
+  .results{display:none;}
+  .results.show{display:block;}
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  thead th{
+    text-align:left;
+    font-size:11px;
+    letter-spacing:.04em;
+    color:var(--ink-faint);
+    text-transform:uppercase;
+    border-bottom:1px solid var(--line);
+    padding:8px 6px;
+  }
+  tbody td{
+    padding:9px 6px;
+    border-bottom:1px solid #F0F1EE;
+    font-family:var(--mono);
+  }
+  tbody tr:last-child td{border-bottom:none; font-weight:700; background:#FBFBFA;}
+  td.name{font-family:var(--sans); font-weight:600;}
+  td.num{text-align:right;}
+
+  .metric-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:14px;
+    margin-top:6px;
+  }
+  @media (max-width:640px){
+    .metric-grid{grid-template-columns:repeat(2,1fr);}
+  }
+  .metric-card{
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:14px 12px;
+    background:#FBFBFA;
+  }
+  .metric-label{
+    font-size:11px;
+    color:var(--ink-faint);
+    letter-spacing:.03em;
+    margin-bottom:6px;
+  }
+  .metric-value{
+    font-family:var(--mono);
+    font-size:22px;
+    font-weight:700;
+  }
+  .grade-banner{
+    margin-top:14px;
+    padding:10px 14px;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:600;
+  }
+  .grade-good{background:var(--good-soft); color:var(--good);}
+  .grade-fair{background:var(--accent-soft); color:var(--accent-dark);}
+  .grade-warn{background:var(--warn-soft); color:var(--warn);}
+  .grade-bad{background:var(--danger-soft); color:var(--danger);}
+
+  .chart-wrap{
+    position:relative;
+    height:340px;
+    margin-top:6px;
+  }
+  .chart-title{
+    font-size:14px;
+    font-weight:700;
+    margin:0 0 12px;
+  }
+  .empty-state{
+    text-align:center;
+    padding:60px 20px;
+    color:var(--ink-faint);
+  }
+  .empty-state .spectrum-chip{
+    display:inline-block;
+    width:64px; height:8px;
+    border-radius:4px;
+    background:var(--spectrum);
+    margin-bottom:16px;
+  }
+  .empty-state p{font-size:14px; margin:4px 0;}
+
+  .download-row{margin-top:16px;}
+  .download-btn{
+    padding:8px 14px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--ink);
+    font-size:12px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .download-btn:hover{border-color:var(--accent); color:var(--accent-dark);}
 </style>
 </head>
-<body class="bg-gray-100 p-3 text-xs">
-<div id="loginScreen" class="min-h-screen flex items-center justify-center">
- <div class="bg-white p-6 rounded-lg shadow w-72 text-center">
-  <div class="font-bold text-base mb-3">分光光度儀對色系統</div>
-  <div class="mb-2 text-left text-gray-600">請輸入密碼</div>
-  <input id="pwInput" type="password" class="border p-2 rounded w-full mb-2" onkeydown="if(event.key==='Enter')tryLogin()">
-  <div id="pwErr" class="hidden text-red-600 mb-2">密碼錯誤</div>
-  <button class="bg-blue-600 text-white px-4 py-2 rounded w-full" onclick="tryLogin()">登入</button>
- </div>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <p class="eyebrow">Kubelka-Munk 雙常數理論 · CIEDE2000 色差公式</p>
+    <h1>0.1mm 色彩色漿自動配色與驗收系統</h1>
+    <p class="subtitle">上傳色料資料庫、輸入目標色彩，系統將自動求解最佳配方並驗收色差</p>
+  </div>
+  <div class="spectrum-bar"></div>
 </div>
-<div id="app" class="max-w-6xl mx-auto space-y-2 hidden"></div>
+
+<div class="layout">
+
+  <!-- 側邊欄 -->
+  <div>
+    <div class="panel">
+      <p class="panel-title"><span class="dot"></span>色料資料庫</p>
+      <p class="panel-desc">上傳含 31 波長 K / S 係數的色料資料</p>
+
+      <label class="file-drop" id="dbDrop">
+        <input type="file" id="dbFile" accept=".xlsx,.xls" />
+        <span id="dbDropText">點擊或拖曳上傳「色漿光譜採樣紀錄」Excel</span>
+      </label>
+      <div class="file-status info" id="dbStatus">尚未上傳，目前使用內建示範色料庫（白 / 黑 / 紅 / 黃 / 藍，共 5 種）</div>
+      <p class="hint">系統會自動讀取「工作表1」，並辨識標準板、黑卡、白卡三筆基準列，以及各色漿編號在不同濃度（C1~C5）下分別於黑卡／白卡量測之 R400~R700 光譜，反算每個色漿的單位 K／S 係數。</p>
+
+      <div id="categoryPanel" style="display:none; margin-top:16px;">
+        <label style="margin-top:0;">色料類別確認（依名稱自動判斷，可手動調整）</label>
+        <table style="font-size:12px;">
+          <thead><tr><th>色漿編號</th><th>濃度筆數</th><th>類別</th></tr></thead>
+          <tbody id="categoryTbody"></tbody>
+        </table>
+        <button class="download-btn" id="applyCategoryBtn" style="margin-top:10px; width:100%;">套用資料庫（共 <span id="pendingCount">0</span> 種色漿）</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title"><span class="dot"></span>配方求解參數</p>
+
+      <label for="maxPigments">色漿最多使用種類上限</label>
+      <input type="number" id="maxPigments" min="1" max="8" value="4" step="1" />
+
+      <label for="filmThickness">膜層厚度 (mm)</label>
+      <input type="number" id="filmThickness" min="0.01" max="5" value="0.1" step="0.01" />
+
+      <label for="totalWeight">配方總重量 (公克)</label>
+      <input type="number" id="totalWeight" min="1" max="10000" value="20" step="1" />
+    </div>
+  </div>
+
+  <!-- 主畫面 -->
+  <div>
+    <div class="panel">
+      <p class="panel-title"><span class="dot"></span>目標色彩輸入</p>
+
+      <div class="mode-toggle">
+        <button id="modeSpecBtn" class="active">輸入 31 波長光譜反射率</button>
+        <button id="modeLabBtn">輸入 L*a*b* 數值</button>
+      </div>
+
+      <div id="specInput">
+        <p class="hint" style="margin-bottom:10px;">請輸入 400nm 至 700nm（間隔 10nm）之光譜反射率數值（0~1 或 0~100 皆可）</p>
+        <div class="wl-grid" id="wlGrid"></div>
+      </div>
+
+      <div id="labInput" style="display:none;">
+        <div class="lab-grid">
+          <div>
+            <label for="labL">L*（明度）</label>
+            <input type="number" id="labL" value="50" step="0.1" />
+          </div>
+          <div>
+            <label for="labA">a*（紅綠軸）</label>
+            <input type="number" id="labA" value="0" step="0.1" />
+          </div>
+          <div>
+            <label for="labB">b*（黃藍軸）</label>
+            <input type="number" id="labB" value="0" step="0.1" />
+          </div>
+        </div>
+        <div class="lab-derived" id="labDerived">彩度 C* = 0.00　色相角 h° = 0.00</div>
+      </div>
+
+      <button class="run-btn" id="runBtn">開始電腦配色</button>
+      <div class="error-banner" id="errorBanner"></div>
+    </div>
+
+    <div class="panel results" id="resultsPanel">
+      <p class="panel-title"><span class="dot"></span>推薦最佳配方</p>
+      <p class="panel-desc" id="recipeDesc">以配方總重量 20.0 公克計算各原料實際添加量</p>
+      <table>
+        <thead>
+          <tr><th>原料名稱</th><th style="text-align:right;">配方比例 (%)</th><th style="text-align:right;">添加量 (公克)</th></tr>
+        </thead>
+        <tbody id="recipeTbody"></tbody>
+      </table>
+      <div class="download-row">
+        <button class="download-btn" id="downloadBtn">下載配方報告 (CSV)</button>
+      </div>
+    </div>
+
+    <div class="panel results" id="metricsPanel">
+      <p class="panel-title"><span class="dot"></span>色差指標</p>
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-label">預估 ΔE₀₀（總色差）</div>
+          <div class="metric-value" id="mDE">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">ΔL*（明度差）</div>
+          <div class="metric-value" id="mDL">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">ΔC*（彩度差）</div>
+          <div class="metric-value" id="mDC">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">ΔH*（色相差）</div>
+          <div class="metric-value" id="mDH">--</div>
+        </div>
+      </div>
+      <div class="grade-banner" id="gradeBanner"></div>
+    </div>
+
+    <div class="panel results" id="chartPanel">
+      <p class="chart-title">目標光譜 vs 預測光譜對比 (400nm - 700nm)</p>
+      <div class="chart-wrap"><canvas id="spectrumChart"></canvas></div>
+    </div>
+
+    <div class="panel" id="emptyPanel">
+      <div class="empty-state">
+        <div class="spectrum-chip"></div>
+        <p>尚未執行配色計算</p>
+        <p>請於上方輸入目標色彩，並點擊「開始電腦配色」</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <script>
-const APP_PASSWORD='123456abc';
-function tryLogin(){
- const v=document.getElementById('pwInput').value.trim();
- if(v===APP_PASSWORD){
-  sessionStorage.setItem('cms_auth','1');
-  document.getElementById('loginScreen').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-  if(window.__appInit){
-   window.__appInit();
-  }else{
-   document.getElementById('app').innerHTML='<div class="p-4 text-red-600">系統模組尚未載入完成，請重新整理頁面。</div>';
+/* ============================================================
+   0.1mm 色彩色漿自動配色與驗收系統 — 純前端運算核心
+   （Kubelka-Munk 雙常數理論 / CIEDE2000 / 配方最佳化求解）
+   ============================================================ */
+
+const WAVELENGTHS = Array.from({length:31}, (_,i)=>400+i*10);
+
+// CIE 1964 十度標準觀察者 (x10,y10,z10)，400-700nm，10nm 間隔
+const CMF10 = [
+  [0.0002,0.0000,0.0007],[0.0024,0.0003,0.0105],[0.0191,0.0020,0.0860],
+  [0.0847,0.0088,0.3894],[0.2045,0.0214,0.9725],[0.3147,0.0387,1.5535],
+  [0.3837,0.0621,1.9673],[0.3707,0.0895,1.9948],[0.3023,0.1282,1.7454],
+  [0.1956,0.1852,1.3176],[0.0805,0.2536,0.7721],[0.0162,0.3391,0.4153],
+  [0.0038,0.4608,0.2185],[0.0375,0.6067,0.1120],[0.1177,0.7618,0.0607],
+  [0.2365,0.8752,0.0305],[0.3768,0.9620,0.0137],[0.5298,0.9918,0.0040],
+  [0.7052,0.9973,0.0011],[0.8787,0.9556,0.0000],[1.0142,0.8689,0.0000],
+  [1.1185,0.7774,0.0000],[1.1240,0.6583,0.0000],[1.0305,0.5280,0.0000],
+  [0.8563,0.3981,0.0000],[0.6475,0.2835,0.0000],[0.4316,0.1798,0.0000],
+  [0.2683,0.1076,0.0000],[0.1526,0.0603,0.0000],[0.0813,0.0318,0.0000],
+  [0.0409,0.0159,0.0000]
+];
+
+// CIE 標準光源 D65 相對光譜能量分布，400-700nm，10nm 間隔
+const D65_SPD = [
+  82.75,91.49,93.43,86.68,104.87,117.01,117.81,114.86,115.92,108.81,
+  109.35,107.80,104.79,107.69,104.41,104.05,100.00,96.33,95.79,88.69,
+  90.01,89.60,87.70,83.29,83.70,80.03,80.21,82.28,78.28,69.72,71.61
+];
+
+const MAX_LIMIT_BY_CATEGORY = { black:0.025, white:0.10, color:0.05 };
+const DEFAULT_RG = WAVELENGTHS.map(()=>0.95);
+
+/* ---------------- Kubelka-Munk 核心公式 ---------------- */
+
+function abFromRatio(r){
+  const a = 1.0 + r;
+  const b = Math.sqrt(Math.max(a*a - 1.0, 1e-12));
+  return [a,b];
+}
+
+function kmReflectanceAt(a,b,S,X,Rg){
+  const eps = 1e-8;
+  let bsx = b*S*X;
+  bsx = Math.min(Math.max(bsx, eps), 700.0);
+  const cothVal = 1.0 / Math.tanh(bsx);
+  const numerator = 1.0 - Rg*(a - b*cothVal);
+  let denominator = a - Rg + b*cothVal;
+  if (Math.abs(denominator) < eps) denominator = eps;
+  return numerator/denominator;
+}
+
+// 依混合 K/S 光譜與背景，計算 31 點預測反射率
+function predictR(Kmix, Smix, Rg, X){
+  const out = new Array(31);
+  for(let i=0;i<31;i++){
+    const S = Smix[i] <= 0 ? 1e-8 : Smix[i];
+    const ratio = Kmix[i]/S;
+    const [a,b] = abFromRatio(ratio);
+    let R = kmReflectanceAt(a,b,S,X,Rg[i]);
+    out[i] = Math.min(Math.max(R,0),1);
   }
- }else{
-  document.getElementById('pwErr').classList.remove('hidden');
- }
-}
-if(sessionStorage.getItem('cms_auth')==='1'){
- document.getElementById('loginScreen').classList.add('hidden');
- document.getElementById('app').classList.remove('hidden');
-}
-</script>
-<script>
-const WL=Array.from({length:31},(_,i)=>400+i*10);
-let DB={colorants:[],spectra:[]};
-let ui={tab:'a',activeId:null};
-
-function uid(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
-function load(){try{DB=JSON.parse(localStorage.getItem('cms_db'))||{colorants:[],spectra:[]}}catch(e){DB={colorants:[],spectra:[]}}}
-function save(){try{localStorage.setItem('cms_db',JSON.stringify(DB))}catch(e){alert('本地儲存空間已滿或寫入失敗，請清除部分資料')}}
-
-function parseSpectralData(str) {
-  if (!str) return [];
-  return str.trim().split(/[\s,\t\r\n]+/).map(v => parseFloat(v)).filter(v => !isNaN(v));
+  return out;
 }
 
-function deltaE00(L1,a1,b1,L2,a2,b2){
- const C1=Math.hypot(a1,b1),C2=Math.hypot(a2,b2),Cbar=(C1+C2)/2;
- const G=0.5*(1-Math.sqrt(Math.pow(Cbar,7)/(Math.pow(Cbar,7)+Math.pow(25,7))));
- const a1p=a1*(1+G),a2p=a2*(1+G);
- const C1p=Math.hypot(a1p,b1),C2p=Math.hypot(a2p,b2);
- let h1p=Math.atan2(b1,a1p)*180/Math.PI;if(h1p<0)h1p+=360;
- let h2p=Math.atan2(b2,a2p)*180/Math.PI;if(h2p<0)h2p+=360;
- const dLp=L2-L1,dCp=C2p-C1p;
- let dhp=0;
- if(C1p*C2p!==0){dhp=h2p-h1p;if(dhp>180)dhp-=360;else if(dhp<-180)dhp+=360}
- const dHp=2*Math.sqrt(C1p*C2p)*Math.sin(dhp*Math.PI/360);
- const Lbar=(L1+L2)/2,Cbarp=(C1p+C2p)/2;
- let hbarp;
- if(C1p*C2p===0)hbarp=h1p+h2p;
- else hbarp=Math.abs(h1p-h2p)>180?(h1p+h2p+360)/2:(h1p+h2p)/2;
- const T=1-0.17*Math.cos((hbarp-30)*Math.PI/180)+0.24*Math.cos(2*hbarp*Math.PI/180)+0.32*Math.cos((3*hbarp+6)*Math.PI/180)-0.20*Math.cos((4*hbarp-63)*Math.PI/180);
- const dTheta=30*Math.exp(-Math.pow((hbarp-275)/25,2));
- const RC=2*Math.sqrt(Math.pow(Cbarp,7)/(Math.pow(Cbarp,7)+Math.pow(25,7)));
- const SL=1+(0.015*Math.pow(Lbar-50,2))/Math.sqrt(20+Math.pow(Lbar-50,2));
- const SC=1+0.045*Cbarp,SH=1+0.015*Cbarp*T;
- const RT=-Math.sin(2*dTheta*Math.PI/180)*RC;
- return Math.sqrt((dLp/SL)**2+(dCp/SC)**2+(dHp/SH)**2+RT*(dCp/SC)*(dHp/SH));
+/* ---------------- CIELAB 轉換 ---------------- */
+
+function spectrumToLab(R){
+  const k = 100.0 / D65_SPD.reduce((s,spd,i)=> s + spd*CMF10[i][1], 0);
+  let X=0,Y=0,Z=0;
+  for(let i=0;i<31;i++){
+    X += D65_SPD[i]*CMF10[i][0]*R[i];
+    Y += D65_SPD[i]*CMF10[i][1]*R[i];
+    Z += D65_SPD[i]*CMF10[i][2]*R[i];
+  }
+  X*=k; Y*=k; Z*=k;
+  const Xn = k*D65_SPD.reduce((s,spd,i)=>s+spd*CMF10[i][0],0);
+  const Yn = k*D65_SPD.reduce((s,spd,i)=>s+spd*CMF10[i][1],0);
+  const Zn = k*D65_SPD.reduce((s,spd,i)=>s+spd*CMF10[i][2],0);
+
+  const f = t => {
+    const delta = 6.0/29.0;
+    return t > delta**3 ? Math.cbrt(t) : t/(3*delta*delta) + 4.0/29.0;
+  };
+  const fx=f(X/Xn), fy=f(Y/Yn), fz=f(Z/Zn);
+  const L = 116*fy - 16;
+  const a = 500*(fx-fy);
+  const b = 200*(fy-fz);
+  const C = Math.sqrt(a*a+b*b);
+  const h = ((Math.atan2(b,a)*180/Math.PI)+360)%360;
+  return {L,a,b,C,h};
 }
 
-function render(){
- const app=document.getElementById('app');
- app.innerHTML=`
- <div class="flex justify-between items-center mb-1">
-  <div class="text-gray-500">💾 本地儲存已就緒</div>
-  <div class="space-x-2">
-   <button class="bg-teal-700 text-white px-3 py-1 rounded" onclick="document.getElementById('xlsxInput').click()">上傳採樣紀錄 (Excel)</button>
-   <input id="xlsxInput" type="file" accept=".xlsx,.xls" class="hidden" onchange="importExcelSampling(event)">
-   <button class="bg-gray-700 text-white px-3 py-1 rounded" onclick="exportData()">導出備份 (JSON)</button>
-   <label class="bg-gray-500 text-white px-3 py-1 rounded cursor-pointer inline-block">
-    導入備份 (JSON)
-    <input type="file" accept="application/json" class="hidden" onchange="importData(event)">
-   </label>
-  </div>
- </div>
- <div class="flex space-x-1">
-  <div class="tab ${ui.tab==='a'?'tabA':'tabI'}" onclick="ui.tab='a';render()">1. 色漿與批號</div>
-  <div class="tab ${ui.tab==='b'?'tabA':'tabI'}" onclick="ui.tab='b';render()">2. 數據錄入</div>
-  <div class="tab ${ui.tab==='c'?'tabA':'tabI'}" onclick="ui.tab='c';render()">3. 對色修正</div>
-  <div class="tab ${ui.tab==='d'?'tabA':'tabI'}" onclick="ui.tab='d';render()">4. 自動配方預測</div>
- </div>
- <div class="bg-white p-4 rounded-b-lg rounded-tr-lg shadow">${ui.tab==='a'?tabColorant():ui.tab==='b'?tabData():ui.tab==='c'?tabMatch():tabRecipe()}</div>`;
+/* ---------------- CIEDE2000 色差 ---------------- */
+
+function deltaE2000(Lab1, Lab2){
+  const {L:L1,a:a1,b:b1} = Lab1;
+  const {L:L2,a:a2,b:b2} = Lab2;
+
+  const C1 = Math.sqrt(a1*a1+b1*b1);
+  const C2 = Math.sqrt(a2*a2+b2*b2);
+  const Cbar = (C1+C2)/2;
+  const G = 0.5*(1-Math.sqrt((Cbar**7)/(Cbar**7+25**7)));
+
+  const a1p = a1*(1+G), a2p = a2*(1+G);
+  const C1p = Math.sqrt(a1p*a1p+b1*b1);
+  const C2p = Math.sqrt(a2p*a2p+b2*b2);
+
+  const h1p = ((Math.atan2(b1,a1p)*180/Math.PI)+360)%360;
+  const h2p = ((Math.atan2(b2,a2p)*180/Math.PI)+360)%360;
+
+  const dLp = L2-L1;
+  const dCp = C2p-C1p;
+
+  let dhp = 0;
+  if (C1p*C2p !== 0){
+    const diff = h2p-h1p;
+    if (Math.abs(diff)<=180) dhp = diff;
+    else if (diff>180) dhp = diff-360;
+    else dhp = diff+360;
+  }
+  const dHp = 2*Math.sqrt(C1p*C2p)*Math.sin((dhp*Math.PI/180)/2);
+
+  const Lbarp = (L1+L2)/2;
+  const Cbarp = (C1p+C2p)/2;
+
+  let Hbarp;
+  if (C1p*C2p===0){ Hbarp = h1p+h2p; }
+  else{
+    const diffh = Math.abs(h1p-h2p);
+    const sumh = h1p+h2p;
+    if (diffh<=180) Hbarp = sumh/2;
+    else if (sumh<360) Hbarp = (sumh+360)/2;
+    else Hbarp = (sumh-360)/2;
+  }
+
+  const rad = d => d*Math.PI/180;
+  const T = 1 - 0.17*Math.cos(rad(Hbarp-30)) + 0.24*Math.cos(rad(2*Hbarp))
+              + 0.32*Math.cos(rad(3*Hbarp+6)) - 0.20*Math.cos(rad(4*Hbarp-63));
+
+  const dTheta = 30*Math.exp(-(((Hbarp-275)/25)**2));
+  const Rc = 2*Math.sqrt((Cbarp**7)/(Cbarp**7+25**7));
+  const Sl = 1 + (0.015*(Lbarp-50)**2)/Math.sqrt(20+(Lbarp-50)**2);
+  const Sc = 1 + 0.045*Cbarp;
+  const Sh = 1 + 0.015*Cbarp*T;
+  const Rt = -Math.sin(rad(2*dTheta))*Rc;
+
+  const termL = dLp/Sl, termC = dCp/Sc, termH = dHp/Sh;
+  const dE00 = Math.sqrt(termL**2+termC**2+termH**2+Rt*termC*termH);
+
+  return {deltaE00:dE00, deltaL:dLp, deltaC:dCp, deltaH:dHp};
 }
 
-function importExcelSampling(event){
- const file=event.target.files[0];
- if(!file)return;
- const reader=new FileReader();
- reader.onload=e=>{
-  try{
-   const wb=XLSX.read(e.target.result,{type:'array'});
-   const sheetName=wb.SheetNames[0];
-   const sheet=wb.Sheets[sheetName];
-   const rows=XLSX.utils.sheet_to_json(sheet,{defval:null});
-   let addedColorants=0,writtenRows=0,skipped=0;
-   rows.forEach(row=>{
-    const code=row['色漿編號'];
-    const sample=row['樣本編號'];
-    const concRaw=row['色漿濃度'];
-    if(code===null||code===undefined||String(code).trim()===''){skipped++;return;}
-    if(!sample){skipped++;return;}
-    const sampleStr=String(sample);
-    let bg=null;
-    if(sampleStr.includes('黑卡'))bg='black';
-    else if(sampleStr.includes('白卡'))bg='white';
-    if(!bg){skipped++;return;}
-    const conc=parseFloat(concRaw);
-    if(isNaN(conc)){skipped++;return;}
-    const L=parseFloat(row['L']);
-    const Cc=parseFloat(row['C']);
-    const H=parseFloat(row['H']);
-    if(isNaN(L)||isNaN(Cc)||isNaN(H)){skipped++;return;}
-    const rad=H*Math.PI/180;
-    const a=Cc*Math.cos(rad);
-    const b=Cc*Math.sin(rad);
-    const R=[];
-    for(let wl=400;wl<=700;wl+=10)R.push(parseFloat(row['R'+wl])||0);
-    const name=String(code).trim();
-    let col=DB.colorants.find(c=>c.name===name);
-    if(!col){
-     col={id:uid('col_'),name,lot_number:''};
-     DB.colorants.push(col);
-     addedColorants++;
+/* ---------------- 內建示範色料資料庫（合成資料） ---------------- */
+
+function gaussianArray(center,width,amp,base){
+  return WAVELENGTHS.map(w => base + amp*Math.exp(-((w-center)**2)/(2*width*width)));
+}
+
+function buildDefaultPigments(){
+  return [
+    {id:'白 White-01', category:'white', K:WAVELENGTHS.map(()=>0.05), S:WAVELENGTHS.map(()=>60)},
+    {id:'黑 Black-01', category:'black', K:WAVELENGTHS.map(()=>35), S:WAVELENGTHS.map(()=>0.8)},
+    {id:'紅 Red-01',   category:'color', K:gaussianArray(530,45,25,1), S:WAVELENGTHS.map(()=>22)},
+    {id:'黃 Yellow-01',category:'color', K:gaussianArray(450,40,30,1), S:WAVELENGTHS.map(()=>22)},
+    {id:'藍 Blue-01',  category:'color', K:gaussianArray(610,50,20,1), S:WAVELENGTHS.map(()=>20)},
+  ];
+}
+
+let pigmentDB = buildDefaultPigments();
+
+/* ---------------- 「色漿光譜採樣紀錄」Excel 解析 ---------------- */
+
+// 依色漿編號名稱猜測預設類別，仍可於畫面上手動調整
+function guessCategory(pigmentId){
+  const s = String(pigmentId);
+  if (s.includes('黑')) return 'black';
+  if (s.includes('白')) return 'white';
+  return 'color';
+}
+
+// 解析上傳的工作簿，反算每個色漿在各波長之單位 K/S 係數（即濃度=100%時的 K/S）
+// 回傳 { pigments: [{id,category,concentrations,K,S}], warnings: [] }
+function parseSamplingWorkbook(workbook, filmThickness){
+  const sheetName = workbook.SheetNames.includes('工作表1') ? '工作表1' : workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null});
+  if (rows.length < 2) throw new Error('工作表內容過少');
+
+  const header = rows[0].map(h => (h===null? '': String(h).trim()));
+  const idxOf = name => header.indexOf(name);
+
+  const idxSample = idxOf('樣本編號');
+  const idxConc = idxOf('色漿濃度');
+  const idxPigment = idxOf('色漿編號');
+  const rIdx = WAVELENGTHS.map(w => idxOf('R'+w));
+
+  if (idxPigment===-1) throw new Error('找不到「色漿編號」欄位');
+  if (rIdx.includes(-1)) throw new Error('找不到完整的 R400~R700 光譜欄位');
+
+  const dataRows = rows.slice(1).filter(r => r && r[idxPigment]!==null && r[idxPigment]!==undefined);
+
+  const getR = (row) => rIdx.map(i => {
+    const v = parseFloat(row[i]);
+    return isNaN(v) ? null : (v>1.5 ? v/100 : v);
+  });
+
+  // 取出黑卡、白卡基準列（樣本編號為空、色漿編號為「黑卡」/「白卡」）
+  let Rgb = null, Rgw = null;
+  for(const row of dataRows){
+    const pigCode = String(row[idxPigment]).trim();
+    if (pigCode==='黑卡') Rgb = getR(row);
+    if (pigCode==='白卡') Rgw = getR(row);
+  }
+  if (!Rgb || !Rgw) throw new Error('工作表中找不到「黑卡」或「白卡」基準列，無法作為背景反射率');
+  if (Rgb.includes(null) || Rgw.includes(null)) throw new Error('黑卡／白卡基準列的光譜資料不完整');
+
+  // 依「色漿編號」分組，並依樣本編號末兩字判斷是黑卡量測還是白卡量測
+  const groups = {}; // pigmentCode -> { concentration -> {Rw, Rb} }
+  for(const row of dataRows){
+    const pigCode = String(row[idxPigment]).trim();
+    if (pigCode==='標準板' || pigCode==='黑卡' || pigCode==='白卡') continue;
+
+    const sampleId = idxSample!==-1 ? String(row[idxSample]||'').trim() : '';
+    const conc = idxConc!==-1 ? parseFloat(row[idxConc]) : NaN;
+    if (isNaN(conc) || conc<=0) continue;
+
+    const isBlack = sampleId.endsWith('黑卡');
+    const isWhite = sampleId.endsWith('白卡');
+    if (!isBlack && !isWhite) continue;
+
+    const R = getR(row);
+    if (R.includes(null)) continue;
+
+    if (!groups[pigCode]) groups[pigCode] = {};
+    if (!groups[pigCode][conc]) groups[pigCode][conc] = {};
+    if (isBlack) groups[pigCode][conc].Rb = R;
+    if (isWhite) groups[pigCode][conc].Rw = R;
+  }
+
+  const pigments = [];
+  const warnings = [];
+
+  for(const pigCode of Object.keys(groups)){
+    const concLevels = Object.keys(groups[pigCode]).map(parseFloat).sort((a,b)=>a-b);
+    const validLevels = concLevels.filter(c => groups[pigCode][c].Rw && groups[pigCode][c].Rb);
+    if (validLevels.length===0){
+      warnings.push(`${pigCode}：缺少完整的黑卡／白卡配對量測，已略過`);
+      continue;
     }
-    let rec=DB.spectra.find(s=>s.colorant_id===col.id&&s.concentration===conc&&s.bg_type===bg);
-    if(!rec){
-     rec={id:uid('sd_'),colorant_id:col.id,concentration:conc,bg_type:bg};
-     DB.spectra.push(rec);
+
+    // 每個濃度反算一組 K(λ)/S(λ)，再以線性迴歸（過原點）求出單位濃度（100%）之 K/S
+    const rawSeries = [];
+    for(const c of validLevels){
+      const {Rw, Rb} = groups[pigCode][c];
+      const {K,S} = calculateKS(Rw, Rb, Rgw, Rgb, filmThickness);
+      rawSeries.push({c, Rw, Rb, K, S});
     }
-    rec.L=L;rec.a=a;rec.b=b;rec.R=R;
-    writtenRows++;
-   });
-   save();
-   ui.tab='a';
-   render();
-   alert('匯入完成\n新增色漿：'+addedColorants+' 個\n寫入光譜紀錄：'+writtenRows+' 筆\n略過（無法辨識或缺值）：'+skipped+' 筆\n\n濃度數值已直接採用檔案內「色漿濃度」欄位的實際數值。');
-  }catch(err){
-   console.error(err);
-   alert('讀取失敗，請確認上傳的是正確格式的採樣紀錄 Excel 檔');
+
+    // 若某濃度在特定波長下白卡／黑卡量測值已趨近相同，代表該波長下薄膜已接近
+    // 不透明（無限厚極限），此時 K 與 S 在數學上難以由雙基材法可靠分離，
+    // 反算結果可能劇烈失真。採用平滑階梯權重：完全飽和的資料點權重歸零
+    // （避免失真數值污染迴歸），僅在過渡帶內平滑漸變，避免波長間出現不連續跳動。
+    const OPACITY_LO = 0.003, OPACITY_HI = 0.01;
+    const opacityWeight = (diff) => {
+      const d = Math.abs(diff);
+      if (d <= OPACITY_LO) return 0;
+      if (d >= OPACITY_HI) return 1;
+      const t = (d-OPACITY_LO)/(OPACITY_HI-OPACITY_LO);
+      return t*t*(3-2*t);
+    };
+
+    let K_unit = new Array(31), S_unit = new Array(31);
+    for(let i=0;i<31;i++){
+      let sumC2=0, sumCK=0, sumCS=0, sumW=0;
+      for(const {c,Rw,Rb,K,S} of rawSeries){
+        const w = opacityWeight(Rw[i]-Rb[i]);
+        sumC2 += w*c*c; sumCK += w*c*K[i]; sumCS += w*c*S[i]; sumW += w;
+      }
+      if (sumW < 1e-6){
+        // 所有濃度在此波長皆已飽和：退回採用最低濃度（最不易飽和）之估計值
+        const lowest = rawSeries[0];
+        sumC2 = lowest.c*lowest.c;
+        sumCK = lowest.c*lowest.K[i];
+        sumCS = lowest.c*lowest.S[i];
+      }
+      K_unit[i] = sumC2>0 ? sumCK/sumC2 : 0;
+      S_unit[i] = sumC2>0 ? sumCS/sumC2 : 0;
+      K_unit[i] = Math.max(K_unit[i], 0);
+      S_unit[i] = Math.max(S_unit[i], 1e-3);
+    }
+
+    K_unit = robustSmooth(K_unit);
+    S_unit = robustSmooth(S_unit);
+
+    pigments.push({
+      id: pigCode,
+      category: guessCategory(pigCode),
+      concentrationCount: validLevels.length,
+      K: K_unit,
+      S: S_unit,
+    });
   }
-  event.target.value='';
- };
- reader.readAsArrayBuffer(file);
+
+  if (pigments.length===0) throw new Error('未能從工作表解析出任何完整的色漿量測資料');
+  return {pigments, warnings};
 }
 
-function exportData(){
- const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
- const url=URL.createObjectURL(blob);
- const a=document.createElement('a');
- a.href=url;
- a.download='color_matching_backup.json';
- document.body.appendChild(a);
- a.click();
- document.body.removeChild(a);
- URL.revokeObjectURL(url);
-}
-
-function importData(event){
- const file=event.target.files[0];
- if(!file)return;
- const reader=new FileReader();
- reader.onload=e=>{
-  try{
-   const data=JSON.parse(e.target.result);
-   if(!data||!Array.isArray(data.colorants)||!Array.isArray(data.spectra)){
-    alert('檔案格式不正確，找不到 colorants 或 spectra 欄位');
-    return;
-   }
-   const mode=confirm('按「確定」= 覆蓋目前所有資料\n按「取消」= 合併到目前資料(保留現有色漿，新增匯入的資料)');
-   if(mode){
-    DB=data;
-   }else{
-    const existIds=new Set(DB.colorants.map(c=>c.id));
-    data.colorants.forEach(c=>{if(!existIds.has(c.id))DB.colorants.push(c)});
-    const existSpecIds=new Set(DB.spectra.map(s=>s.id));
-    data.spectra.forEach(s=>{if(!existSpecIds.has(s.id))DB.spectra.push(s)});
-   }
-   ui.activeId=null;
-   save();render();
-   alert('匯入完成');
-  }catch(err){
-   alert('讀取檔案失敗，請確認是先前匯出的 JSON 備份檔');
+// 真實吸收／散射光譜隨波長應平滑變化。若單一波長點與左右相鄰點的均值
+// 相差超過 4 倍，視為反算過程中的數值假影（例如飽和或局部最小值），
+// 以相鄰點內插取代，避免污染後續配方預測。
+function despikeSpectrum(arr){
+  const out = arr.slice();
+  const n = arr.length;
+  for(let i=1;i<n-1;i++){
+    const neighborAvg = (arr[i-1]+arr[i+1])/2;
+    if (neighborAvg > 1e-6 && (arr[i] > neighborAvg*4 || arr[i] < neighborAvg*0.25)){
+      out[i] = neighborAvg;
+    }
   }
-  event.target.value='';
- };
- reader.readAsText(file);
-}
-
-function tabColorant(){
- let rows=DB.colorants.map(c=>`
-  <tr class="${c.id===ui.activeId?'bg-blue-50':''}">
-   <td><input type="radio" name="acol" ${c.id===ui.activeId?'checked':''} onclick="ui.activeId='${c.id}';render()"></td>
-   <td>${c.name}</td><td>${c.lot_number}</td>
-   <td><button class="text-red-600" onclick="delColorant('${c.id}')">刪除</button></td>
-  </tr>`).join('');
- return `
- <div class="mb-3 flex space-x-2">
-  <input id="ncName" type="text" placeholder="色漿名稱" class="border p-1 rounded w-40">
-  <input id="ncLot" type="text" placeholder="批號" class="border p-1 rounded w-40">
-  <button class="bg-blue-600 text-white px-3 rounded" onclick="addColorant()">新增</button>
- </div>
- <table class="w-full border-collapse"><thead><tr class="border-b font-bold">
-  <th>選用</th><th>名稱</th><th>批號</th><th>操作</th></tr></thead>
-  <tbody>${rows||'<tr><td colspan=4 class="text-gray-400 py-2">尚無色漿，請先新增</td></tr>'}</tbody></table>`;
-}
-
-function addColorant(){
- const name=document.getElementById('ncName').value.trim();
- const lot=document.getElementById('ncLot').value.trim();
- if(!name)return alert('請輸入色漿名稱');
- const id=uid('col_');
- DB.colorants.push({id,name,lot_number:lot});
- ui.activeId=id;save();render();
-}
-function delColorant(id){
- if(!confirm('確定刪除此色漿及其所有數據？'))return;
- DB.colorants=DB.colorants.filter(c=>c.id!==id);
- DB.spectra=DB.spectra.filter(s=>s.colorant_id!==id);
- if(ui.activeId===id)ui.activeId=null;
- save();render();
-}
-
-function tabData(){
- if(!ui.activeId)return '<div class="text-gray-400">請先於「色漿與批號」頁選擇一個色漿</div>';
- const col=DB.colorants.find(c=>c.id===ui.activeId);
- const recs=DB.spectra.filter(s=>s.colorant_id===ui.activeId)
-  .sort((x,y)=>x.bg_type===y.bg_type?(x.concentration-y.concentration):(x.bg_type<y.bg_type?-1:1));
- let rows=recs.map(rec=>{
-  const rStr=(rec.R||[]).join(',');
-  return `<tr class="border-b">
-   <td><input id="C_${rec.id}" type="number" step="0.0001" value="${rec.concentration??''}" class="w-20"></td>
-   <td><select id="BG_${rec.id}" class="border p-1 rounded">
-    <option value="white" ${rec.bg_type==='white'?'selected':''}>白底</option>
-    <option value="black" ${rec.bg_type==='black'?'selected':''}>黑底</option>
-   </select></td>
-   <td><input id="L_${rec.id}" type="number" step="0.01" value="${rec.L??''}"></td>
-   <td><input id="a_${rec.id}" type="number" step="0.01" value="${rec.a??''}"></td>
-   <td><input id="b_${rec.id}" type="number" step="0.01" value="${rec.b??''}"></td>
-   <td><input id="R_${rec.id}" type="text" placeholder="貼上 31 點光譜反射率 (支援空白、Tab 或逗號分隔)" value="${rStr}"></td>
-   <td class="whitespace-nowrap">
-    <button class="bg-green-600 text-white px-2 rounded" onclick="saveDataRow('${rec.id}')">儲存</button>
-    <button class="text-red-600" onclick="deleteDataRow('${rec.id}')">刪除</button>
-   </td>
-  </tr>`;
- }).join('');
- return `<div class="mb-2 font-bold">目前色漿：${col.name} (批號 ${col.lot_number||'-'})</div>
- <div class="mb-2 space-x-2">
-  <button class="bg-blue-600 text-white px-2 py-1 rounded" onclick="addDataRow('white')">+ 新增白底濃度紀錄</button>
-  <button class="bg-gray-800 text-white px-2 py-1 rounded" onclick="addDataRow('black')">+ 新增黑底濃度紀錄</button>
- </div>
- <table class="w-full border-collapse"><thead><tr class="border-b font-bold">
- <th>濃度(%)</th><th>底色</th><th>L</th><th>a</th><th>b</th><th>反射率 R(400-700nm,31點)</th><th></th></tr></thead>
- <tbody>${rows||'<tr><td colspan=7 class="text-gray-400 py-2">尚無數據，請按上方按鈕新增</td></tr>'}</tbody></table>`;
-}
-
-function addDataRow(bg){
- if(!ui.activeId)return;
- const rec={id:uid('sd_'),colorant_id:ui.activeId,concentration:0,bg_type:bg,L:0,a:0,b:0,R:[]};
- DB.spectra.push(rec);
- save();render();
-}
-
-function saveDataRow(id){
- const rec=DB.spectra.find(s=>s.id===id);
- if(!rec)return;
- const conc=parseFloat(document.getElementById(`C_${id}`).value);
- const bg=document.getElementById(`BG_${id}`).value;
- const L=parseFloat(document.getElementById(`L_${id}`).value);
- const a=parseFloat(document.getElementById(`a_${id}`).value);
- const b=parseFloat(document.getElementById(`b_${id}`).value);
- const Rraw=document.getElementById(`R_${id}`).value;
- const R=parseSpectralData(Rraw);
- if(Rraw && R.length!==31)return alert('反射率須為 31 個數值 (400-700nm，10nm 間隔)');
- if(isNaN(conc)||isNaN(L)||isNaN(a)||isNaN(b))return alert('請輸入完整的濃度與 L a b 數值');
- rec.concentration=conc;rec.bg_type=bg;rec.L=L;rec.a=a;rec.b=b;rec.R=R;
- save();alert('已儲存至本地');
-}
-
-function deleteDataRow(id){
- if(!confirm('確定刪除此筆濃度紀錄？'))return;
- DB.spectra=DB.spectra.filter(s=>s.id!==id);
- save();render();
-}
-
-function tabMatch(){
- const checkBoxes=DB.colorants.map(c=>`
-  <label class="inline-flex items-center space-x-1 mr-2">
-   <input type="checkbox" name="mcol" value="${c.id}" checked> ${c.name}
-  </label>`).join('');
- return `
- <div class="space-y-2">
-  <div class="font-bold border-b pb-1">第一步：勾選參與調色的色漿</div>
-  <div>${checkBoxes||'<span class="text-gray-400">請先建立色漿</span>'}</div>
-
-  <div class="font-bold border-b pb-1 pt-1">第二步：輸入目標與目前打樣數據</div>
-  <div class="grid grid-cols-6 gap-2">
-   <div class="col-span-3"><label class="block text-gray-600">目標色光譜 R (31點)</label>
-   <input id="mtTarR" type="text" class="border p-1 rounded" placeholder="直接複製貼上光譜反射率數據"></div>
-   <div class="col-span-3"><label class="block text-gray-600">目前第一次打樣光譜 R (31點)</label>
-   <input id="mtTrialR" type="text" class="border p-1 rounded" placeholder="與上面同格式"></div>
-  </div>
-
-  <div class="font-bold border-b pb-1 pt-1">第三步：輸入當前打樣配方比例 (以英文逗號或空白分隔)</div>
-  <input id="mtCurrentC" type="text" class="border p-1 rounded w-full" placeholder="例如: 1.5, 0.4, 2.1 (對應上方勾選順序)">
-
-  <div class="grid grid-cols-2 gap-2 pt-1">
-   <div class="flex items-center space-x-2">
-    <label class="text-gray-600 whitespace-nowrap">目前桶內油漆剩餘重量 (g)</label>
-    <input id="mtBucketWeight" type="number" value="1000" class="border p-1 rounded">
-   </div>
-   <div class="flex items-center space-x-2">
-    <label class="text-gray-600 whitespace-nowrap">修色靈敏度 (阻尼係數)</label>
-    <input id="mtDamping" type="range" min="0.1" max="1.0" step="0.1" value="0.5" class="w-32">
-    <span id="mtDampingVal" class="font-bold text-blue-800">0.5</span>
-   </div>
-  </div>
-
-  <button class="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold mt-2" onclick="runMultiMatch()">計算修色補正配方</button>
-  <div id="multiMatchResult" class="mt-2 p-2 bg-gray-50 rounded border min-h-[50px]"></div>
- </div>`;
-}
-
-document.addEventListener('input', (e) => {
-  if (e.target && e.target.id === 'mtDamping') {
-    document.getElementById('mtDampingVal').innerText = e.target.value;
+  if (n>=3){
+    if (out[1] > 1e-6 && (arr[0] > out[1]*4 || arr[0] < out[1]*0.25)) out[0] = out[1];
+    if (out[n-2] > 1e-6 && (arr[n-1] > out[n-2]*4 || arr[n-1] < out[n-2]*0.25)) out[n-1] = out[n-2];
   }
+  return out;
+}
+
+// 多輪去尖峰（處理連續 2~3 點異常），並以整條光譜的中位數作最終安全鉗制，
+// 避免極少數頑固的反算失真值（例如同一色漿在極暗波段連續多點皆已飽和）
+// 影響配方預測的穩定性
+function robustSmooth(arr){
+  let a = arr.slice();
+  for(let pass=0; pass<3; pass++) a = despikeSpectrum(a);
+  const sorted = [...a].sort((x,y)=>x-y);
+  const median = sorted[Math.floor(sorted.length/2)];
+  if (median > 1e-6){
+    a = a.map(v => Math.min(v, median*20));
+  }
+  return a;
+}
+
+/* ---------------- 配方最佳化求解（Pattern Search） ---------------- */
+
+function mixPredictR(ratios, pigments, Rg, X){
+  const Kmix = WAVELENGTHS.map(()=>0);
+  const Smix = WAVELENGTHS.map(()=>0);
+  for(let p=0;p<pigments.length;p++){
+    const c = ratios[p];
+    for(let i=0;i<31;i++){
+      Kmix[i] += c*pigments[p].K[i];
+      Smix[i] += c*pigments[p].S[i];
+    }
+  }
+  return predictR(Kmix, Smix, Rg, X);
+}
+
+function boundsFor(pigments){
+  return pigments.map(p => [0, MAX_LIMIT_BY_CATEGORY[p.category] ?? MAX_LIMIT_BY_CATEGORY.color]);
+}
+
+// 無梯度之座標式樣型搜尋（compass search），於邊界內最小化目標函數
+// clampFn 可選：每次試探後對候選解做額外投影（例如限制比例總和 <= 1）
+function compassSearch(objFn, x0, bounds, maxIter=250, clampFn=null){
+  const n = bounds.length;
+  let x = clampFn ? clampFn(x0.slice()) : x0.slice();
+  let step = bounds.map(b => (b[1]-b[0])*0.25 || 0.01);
+  let fx = objFn(x);
+
+  for(let iter=0; iter<maxIter; iter++){
+    let improved = false;
+    for(let d=0; d<n; d++){
+      for(const dir of [1,-1]){
+        let trial = x.slice();
+        trial[d] = Math.min(Math.max(trial[d] + dir*step[d], bounds[d][0]), bounds[d][1]);
+        if (clampFn) trial = clampFn(trial);
+        const ftrial = objFn(trial);
+        if (ftrial < fx - 1e-9){
+          x = trial;
+          fx = ftrial;
+          improved = true;
+        }
+      }
+    }
+    if (!improved){
+      step = step.map(s=>s*0.5);
+      if (step.every(s=>s<1e-5)) break;
+    }
+  }
+  return {x, fx};
+}
+
+// 比例總和 <= 1 之投影（用於配方最佳化）
+function clampRatioSum(vec){
+  const s = vec.reduce((a,b)=>a+b,0);
+  if (s > 1.0){
+    const scale = 1.0/s;
+    return vec.map(v=>v*scale);
+  }
+  return vec;
+}
+
+/* ---------------- 雙基材法反算單一波長之 K、S ---------------- */
+
+// 以對數空間 (ln r, ln s) 搜尋，避免 r、s 跨越極大動態範圍時
+// 線性空間樣型搜尋容易卡在平坦區域、導致數值不穩定或爆走。
+// 另外採用多組起始點重啟，避免單一起始點使搜尋落入不良局部最小值。
+function calculateKS_wavelength(Rw, Rb, Rgw, Rgb, X){
+  const rbSafe = Math.min(Math.max(Rb, 1e-4), 0.9999);
+  const r0 = (1-rbSafe)**2 / (2*rbSafe);
+  const logR0 = Math.log(Math.max(r0, 1e-6));
+
+  const objFn = ([lr,ls]) => {
+    const r = Math.exp(lr), s = Math.exp(ls);
+    const [a,b] = abFromRatio(r);
+    const predW = kmReflectanceAt(a,b,s,X,Rgw);
+    const predB = kmReflectanceAt(a,b,s,X,Rgb);
+    return (predW-Rw)**2 + (predB-Rb)**2;
+  };
+
+  const bounds = [[-14,14],[-10,12]];
+  // 多組起始點（不同的 ln s 初始猜測），各自搜尋後取殘差最小者
+  const starts = [
+    [logR0, Math.log(1.0)],
+    [logR0, Math.log(10.0)],
+    [logR0, Math.log(100.0)],
+    [logR0, Math.log(0.1)],
+    [logR0 + 1, Math.log(5.0)],
+  ];
+
+  let best = null;
+  for(const x0 of starts){
+    const {x, fx} = compassSearch(objFn, x0, bounds, 300);
+    if (best===null || fx < best.fx) best = {x, fx};
+  }
+
+  const rOpt = Math.exp(best.x[0]), sOpt = Math.exp(best.x[1]);
+  return {K: rOpt*sOpt, S: sOpt};
+}
+
+// 對 31 個波長分別反算 K、S 係數陣列（對應 Python 版 calculate_KS）
+function calculateKS(Rw, Rb, Rgw, Rgb, X){
+  const K = new Array(31), S = new Array(31);
+  for(let i=0;i<31;i++){
+    const r = calculateKS_wavelength(Rw[i], Rb[i], Rgw[i], Rgb[i], X);
+    K[i]=r.K; S[i]=r.S;
+  }
+  return {K,S};
+}
+
+function combinations(arr, k){
+  const result = [];
+  const combo = [];
+  function backtrack(start){
+    if (combo.length === k){ result.push(combo.slice()); return; }
+    for(let i=start;i<arr.length;i++){
+      combo.push(arr[i]);
+      backtrack(i+1);
+      combo.pop();
+    }
+  }
+  backtrack(0);
+  return result;
+}
+
+function solveFormulation(pigments, targetLab, maxPigments, filmThickness, Rg, opts={}){
+  const earlyStop = opts.earlyStop ?? 0.3;
+  const maxCombos = opts.maxCombos ?? 400;
+
+  const indices = pigments.map((_,i)=>i);
+  let best = null; // {deltaE, x, comboIdx}
+  let tried = 0;
+
+  outer:
+  for(let r=1; r<=maxPigments; r++){
+    const combos = combinations(indices, r);
+    for(const comboIdx of combos){
+      if (tried >= maxCombos) break outer;
+      tried++;
+
+      const comboPigments = comboIdx.map(i=>pigments[i]);
+      const bounds = boundsFor(comboPigments);
+
+      const objFn = (ratios) => {
+        const R = mixPredictR(ratios, comboPigments, Rg, filmThickness);
+        const lab = spectrumToLab(R);
+        return deltaE2000(lab, targetLab).deltaE00;
+      };
+
+      const x0 = bounds.map(b => Math.min(b[1]*0.3, b[1]));
+      const {x, fx} = compassSearch(objFn, x0, bounds, 250, clampRatioSum);
+
+      if (best===null || fx < best.deltaE){
+        best = {deltaE:fx, x, comboIdx};
+      }
+      if (best.deltaE <= earlyStop) break outer;
+    }
+  }
+
+  if (best===null) throw new Error('找不到符合限制式之最佳化解');
+
+  const comboPigments = best.comboIdx.map(i=>pigments[i]);
+  const R_pred = mixPredictR(best.x, comboPigments, Rg, filmThickness);
+  const predLab = spectrumToLab(R_pred);
+  const de = deltaE2000(predLab, targetLab);
+
+  const recipe = {};
+  best.comboIdx.forEach((pIdx, j) => {
+    if (best.x[j] > 1e-4) recipe[pigments[pIdx].id] = best.x[j];
+  });
+
+  return {
+    recipe,
+    predicted_R: R_pred,
+    predicted_deltaE: de.deltaE00,
+    deltaL: de.deltaL,
+    deltaC: de.deltaC,
+    deltaH: de.deltaH,
+  };
+}
+
+/* ============================================================
+   UI 邏輯
+   ============================================================ */
+
+// 建立 31 個波長輸入欄位
+const wlGrid = document.getElementById('wlGrid');
+WAVELENGTHS.forEach(w=>{
+  const wrap = document.createElement('div');
+  wrap.className = 'wl-field';
+  wrap.innerHTML = `<label>${w}nm</label><input type="number" step="0.01" min="0" max="100" value="50" data-wl="${w}" />`;
+  wlGrid.appendChild(wrap);
 });
 
-function runMultiMatch(){
- const out=document.getElementById('multiMatchResult');
- const chks=Array.from(document.querySelectorAll('input[name="mcol"]:checked')).map(el=>el.value);
- const tarR=parseSpectralData(document.getElementById('mtTarR').value);
- const triR=parseSpectralData(document.getElementById('mtTrialR').value);
- const curC=parseSpectralData(document.getElementById('mtCurrentC').value);
- const damping=parseFloat(document.getElementById('mtDamping').value)||0.5;
- const bucketWeight=parseFloat(document.getElementById('mtBucketWeight').value)||1000;
+// 輸入模式切換
+const modeSpecBtn = document.getElementById('modeSpecBtn');
+const modeLabBtn = document.getElementById('modeLabBtn');
+const specInput = document.getElementById('specInput');
+const labInput = document.getElementById('labInput');
+let currentMode = 'spec';
 
- if(chks.length===0||tarR.length!==31||triR.length!==31||curC.length!==chks.length||tarR.some(isNaN)||triR.some(isNaN)||curC.some(isNaN)){
-  out.innerHTML='<span class="text-red-600 font-bold">錯誤：請確認勾選的色漿數量與輸入的配方個數一致，且光譜數據必須為 31 點。</span>';
-  return;
- }
+modeSpecBtn.addEventListener('click', ()=>{
+  currentMode='spec';
+  modeSpecBtn.classList.add('active');
+  modeLabBtn.classList.remove('active');
+  specInput.style.display='block';
+  labInput.style.display='none';
+});
+modeLabBtn.addEventListener('click', ()=>{
+  currentMode='lab';
+  modeLabBtn.classList.add('active');
+  modeSpecBtn.classList.remove('active');
+  specInput.style.display='none';
+  labInput.style.display='block';
+});
 
- const dbData=chks.map(id=>computeUnitKS(id));
- const adjustment=new Array(chks.length).fill(0);
-
- for(let i=0;i<chks.length;i++){
-  let diffSum=0;
-  for(let w=0;w<31;w++){
-   const dR=tarR[w]-triR[w];
-   diffSum+=dR*dbData[i].K[w]*damping;
-  }
-  adjustment[i]=diffSum;
- }
-
- let rowsHtml='';
- chks.forEach((id,i)=>{
-  const col=DB.colorants.find(c=>c.id===id);
-  const name=col?col.name:id;
-  const action=adjustment[i]>=0?'<span class="text-red-600 font-bold">追加</span>':'<span class="text-green-600 font-bold">減少</span>';
-  const absVal=Math.abs(adjustment[i]);
-  const finalC=Math.max(0,curC[i]+adjustment[i]);
-  const gramCell=adjustment[i]>=0?`<span class="font-bold text-red-600">${(absVal/100*bucketWeight).toFixed(2)} g</span>`:'<span class="text-gray-500">不需加 (原配比偏多)</span>';
-  rowsHtml+=`<tr class="border-b">
-   <td>${name}</td>
-   <td>${curC[i]}%</td>
-   <td>${action} ${absVal.toFixed(3)}%</td>
-   <td class="font-bold">${finalC.toFixed(3)}%</td>
-   <td>${gramCell}</td>
-  </tr>`;
- });
-
- out.innerHTML=`
- <div class="font-bold text-blue-900 mb-2">複方修色加料建議 (依目前桶內剩餘 ${bucketWeight} g 換算)：</div>
- <table class="w-full border-collapse">
-  <thead><tr class="border-b font-bold">
-   <th>色漿</th><th>目前配比</th><th>建議調整</th><th>調整後配比</th><th>電子秤追加克數</th>
-  </tr></thead>
-  <tbody>${rowsHtml}</tbody>
- </table>`;
+// Lab 衍生數值即時顯示
+function updateLabDerived(){
+  const L = parseFloat(document.getElementById('labL').value)||0;
+  const a = parseFloat(document.getElementById('labA').value)||0;
+  const b = parseFloat(document.getElementById('labB').value)||0;
+  const C = Math.sqrt(a*a+b*b);
+  const h = ((Math.atan2(b,a)*180/Math.PI)+360)%360;
+  document.getElementById('labDerived').textContent =
+    `彩度 C* = ${C.toFixed(2)}　色相角 h° = ${h.toFixed(2)}`;
 }
+['labL','labA','labB'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', updateLabDerived);
+});
+updateLabDerived();
 
-function computeUnitKS(colorantId){
- const specs=DB.spectra.filter(s=>s.colorant_id===colorantId&&s.R&&s.R.length===31);
- const unitK=new Array(31).fill(0);
- const unitS=new Array(31).fill(0);
- const concs=[...new Set(specs.map(s=>s.concentration))];
- if(concs.length===0)return {K:unitK,S:unitS};
- for(let w=0;w<31;w++){
-  let numK=0,numS=0,den=0;
-  concs.forEach(c=>{
-   const wSpec=specs.find(s=>s.concentration===c&&s.bg_type==='white');
-   const bSpec=specs.find(s=>s.concentration===c&&s.bg_type==='black');
-   if(wSpec&&bSpec){
-    const Rw=Math.max(wSpec.R[w],1e-4);
-    const Rb=Math.max(bSpec.R[w],1e-4);
-    const a=0.5*(Rw+(Rb-Rw+1)/Rb);
-    const b=Math.sqrt(Math.max(a*a-1,0));
-    const S_conc=(b>0)?(1/b)*Math.log((1-Rb*(a-b))/(1-Rb*(a+b))):0;
-    const K_conc=S_conc*(a-1);
-    numK+=c*K_conc;numS+=c*S_conc;den+=c*c;
-   }
+// 資料庫上傳
+const dbFile = document.getElementById('dbFile');
+const dbDrop = document.getElementById('dbDrop');
+const dbStatus = document.getElementById('dbStatus');
+const dbDropText = document.getElementById('dbDropText');
+
+const categoryPanel = document.getElementById('categoryPanel');
+const categoryTbody = document.getElementById('categoryTbody');
+const applyCategoryBtn = document.getElementById('applyCategoryBtn');
+const pendingCountEl = document.getElementById('pendingCount');
+let pendingPigments = [];
+
+const CATEGORY_LABELS = {black:'黑色', white:'白色', color:'彩色'};
+
+function renderCategoryTable(pigments){
+  categoryTbody.innerHTML = '';
+  pigments.forEach((p, idx)=>{
+    const tr = document.createElement('tr');
+    const select = document.createElement('select');
+    select.style.cssText = 'font-family:var(--mono); font-size:12px; padding:4px; border:1px solid var(--line); border-radius:4px;';
+    ['black','white','color'].forEach(cat=>{
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = CATEGORY_LABELS[cat];
+      if (cat===p.category) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', ()=>{ pendingPigments[idx].category = select.value; });
+
+    tr.innerHTML = `<td class="name">${p.id}</td><td class="num">${p.concentrationCount}</td>`;
+    const tdSelect = document.createElement('td');
+    tdSelect.appendChild(select);
+    tr.appendChild(tdSelect);
+    categoryTbody.appendChild(tr);
   });
-  unitK[w]=den>1e-9?numK/den:0;
-  unitS[w]=den>1e-9?numS/den:0;
- }
- return {K:unitK,S:unitS};
+  pendingCountEl.textContent = pigments.length;
+  categoryPanel.style.display = 'block';
 }
 
-function predictRecipe(colorantIds,targetR,maxTotal){
- maxTotal=maxTotal||10;
- const n=colorantIds.length;
- const dbData=colorantIds.map(id=>computeUnitKS(id));
- const K_sub=new Array(31).fill(0.01);
- const S_sub=new Array(31).fill(1.0);
- const targetKS=targetR.map(R=>{R=Math.max(R,1e-4);return (1-R)*(1-R)/(2*R);});
- let C=new Array(n).fill(0.1);
- const lr=0.005;
- const iters=2000;
- for(let it=0;it<iters;it++){
-  const resid=new Array(31);
-  for(let w=0;w<31;w++){
-   let sumK=K_sub[w],sumS=S_sub[w];
-   for(let i=0;i<n;i++){sumK+=C[i]*dbData[i].K[w];sumS+=C[i]*dbData[i].S[w];}
-   const predKS=sumS>1e-9?sumK/sumS:0;
-   resid[w]=predKS-targetKS[w];
-  }
-  for(let i=0;i<n;i++){
-   let grad=0;
-   for(let w=0;w<31;w++)grad+=dbData[i].K[w]*resid[w];
-   C[i]-=lr*grad;
-   if(C[i]<0)C[i]=0;
-  }
-  const sum=C.reduce((a,b)=>a+b,0);
-  if(sum>maxTotal){
-   const scale=maxTotal/sum;
-   for(let i=0;i<n;i++)C[i]*=scale;
-  }
- }
- return colorantIds.map((id,i)=>{
-  const col=DB.colorants.find(c=>c.id===id);
-  const rawPercent = Math.round(C[i]*1000)/1000;
-  return {id,name:col?col.name:id,percent:rawPercent >= 0.01 ? rawPercent : 0};
- });
+dbFile.addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if (!file) return;
+  dbStatus.textContent = '正在解析 Excel 檔案...';
+  dbStatus.className = 'file-status info';
+  categoryPanel.style.display = 'none';
+
+  const reader = new FileReader();
+  reader.onload = (evt)=>{
+    try{
+      const filmThickness = parseFloat(document.getElementById('filmThickness').value)||0.1;
+      const workbook = XLSX.read(evt.target.result, {type:'array'});
+      const {pigments, warnings} = parseSamplingWorkbook(workbook, filmThickness);
+
+      pendingPigments = pigments;
+      renderCategoryTable(pendingPigments);
+
+      let msg = `解析成功，共辨識出 ${pigments.length} 種色漿（依黑卡／白卡量測反算 K/S），請確認下方類別後點擊套用`;
+      if (warnings.length>0) msg += `　｜　已略過 ${warnings.length} 筆資料不完整之色漿`;
+      dbStatus.textContent = msg;
+      dbStatus.className = 'file-status ok';
+      dbDropText.textContent = file.name;
+    }catch(err){
+      dbStatus.textContent = `資料庫載入失敗：${err.message}`;
+      dbStatus.className = 'file-status err';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+applyCategoryBtn.addEventListener('click', ()=>{
+  if (pendingPigments.length===0) return;
+  pigmentDB = pendingPigments.map(p => ({id:p.id, category:p.category, K:p.K, S:p.S}));
+  dbStatus.textContent = `資料庫套用成功，共 ${pigmentDB.length} 種色漿已載入配方求解引擎`;
+  dbStatus.className = 'file-status ok';
+  categoryPanel.style.display = 'none';
+});
+
+// 執行配色
+const runBtn = document.getElementById('runBtn');
+const errorBanner = document.getElementById('errorBanner');
+let chartInstance = null;
+
+function showError(msg){
+  errorBanner.textContent = msg;
+  errorBanner.classList.add('show');
+}
+function clearError(){
+  errorBanner.classList.remove('show');
 }
 
-function tabRecipe(){
- return `
- <div class="mb-2">目標光譜 R(400-700nm,31點,貼上或空白分隔均可)</div>
- <input id="trSpec" type="text" class="border p-1 rounded w-full mb-2">
- <div class="flex items-center space-x-4 mb-2">
-  <div class="flex items-center space-x-2">
-   <label class="whitespace-nowrap">總濃度上限%</label><input id="trMax" type="number" value="10" class="border p-1 rounded w-24">
-  </div>
-  <div class="flex items-center space-x-2">
-   <label class="whitespace-nowrap">預計調配總重量 (g)</label><input id="trWeight" type="number" value="1000" class="border p-1 rounded w-28">
-  </div>
-  <button class="bg-indigo-600 text-white px-4 py-1 rounded" onclick="runRecipePredict()">預測配方</button>
- </div>
- <div id="recipeResult" class="mt-2"></div>`;
+function gradeInfo(de){
+  if (de<=0.5) return {cls:'grade-good', text:'色差評級：優良（ΔE ≤ 0.5，肉眼幾乎無法辨識差異）'};
+  if (de<=1.0) return {cls:'grade-fair', text:'色差評級：良好（0.5 < ΔE ≤ 1.0，需仔細比對方可辨識）'};
+  if (de<=2.0) return {cls:'grade-warn', text:'色差評級：尚可（1.0 < ΔE ≤ 2.0，經驗豐富之檢驗人員可辨識）'};
+  return {cls:'grade-bad', text:'色差評級：不合格（ΔE > 2.0，建議重新調整配方）'};
 }
 
-function runRecipePredict(){
- const raw=document.getElementById('trSpec').value;
- const R=parseSpectralData(raw);
- const out=document.getElementById('recipeResult');
- if(R.length!==31||R.some(isNaN)){out.innerHTML='<div class="text-red-600">請輸入 31 個目標波長反射率</div>';return;}
- const maxTotal=parseFloat(document.getElementById('trMax').value)||10;
- const totalWeight=parseFloat(document.getElementById('trWeight').value)||1000;
- const ids=DB.colorants.map(c=>c.id);
- if(ids.length===0){out.innerHTML='<div class="text-red-600">尚無色漿資料</div>';return;}
- const res=predictRecipe(ids,R,maxTotal);
- let colorantWeightSum=0;
- const rowsHtml=res.map(r=>{
-  const g=(r.percent/100)*totalWeight;
-  colorantWeightSum+=g;
-  return `<tr class="border-b">
-   <td>${r.name}</td>
-   <td class="font-bold text-indigo-700">${r.percent}%</td>
-   <td class="font-bold">${g.toFixed(2)} g</td>
-  </tr>`;
- }).join('');
- const baseWeight=Math.max(0,totalWeight-colorantWeightSum);
- out.innerHTML=`
- <table class="w-full border-collapse">
-  <thead><tr class="border-b font-bold"><th>色漿</th><th>建議配比</th><th>實際秤重 (g)</th></tr></thead>
-  <tbody>${rowsHtml}
-   <tr class="border-b bg-gray-50">
-    <td class="font-bold">主體基料</td>
-    <td class="text-gray-500">-</td>
-    <td class="font-bold">${baseWeight.toFixed(2)} g</td>
-   </tr>
-  </tbody>
- </table>
- <div class="mt-2 text-gray-600">總重量：${totalWeight} g　（色漿合計 ${colorantWeightSum.toFixed(2)} g ＋ 基料 ${baseWeight.toFixed(2)} g）</div>`;
-}
+let lastRecipeCSV = '';
 
-window.__appInit=function(){
- load();
- render();
-};
-if(sessionStorage.getItem('cms_auth')==='1')window.__appInit();
+runBtn.addEventListener('click', ()=>{
+  clearError();
+  runBtn.disabled = true;
+  runBtn.textContent = '計算中，請稍候...';
+
+  setTimeout(()=>{
+    try{
+      const maxPigments = parseInt(document.getElementById('maxPigments').value)||4;
+      const filmThickness = parseFloat(document.getElementById('filmThickness').value)||0.1;
+      const totalWeight = parseFloat(document.getElementById('totalWeight').value)||20;
+
+      let targetLab, targetR = null;
+
+      if (currentMode==='spec'){
+        const vals = Array.from(document.querySelectorAll('#wlGrid input')).map(inp=>parseFloat(inp.value));
+        if (vals.some(v=>isNaN(v))) throw new Error('請完整輸入 31 個波長之反射率數值');
+        const maxVal = Math.max(...vals);
+        targetR = maxVal > 1.5 ? vals.map(v=>v/100) : vals.slice();
+        targetLab = spectrumToLab(targetR);
+      } else {
+        const L = parseFloat(document.getElementById('labL').value);
+        const a = parseFloat(document.getElementById('labA').value);
+        const b = parseFloat(document.getElementById('labB').value);
+        if ([L,a,b].some(v=>isNaN(v))) throw new Error('請完整輸入 L*, a*, b* 數值');
+        const C = Math.sqrt(a*a+b*b);
+        const h = ((Math.atan2(b,a)*180/Math.PI)+360)%360;
+        targetLab = {L,a,b,C,h};
+      }
+
+      const result = solveFormulation(pigmentDB, targetLab, maxPigments, filmThickness, DEFAULT_RG);
+
+      // 配方表
+      const recipeTbody = document.getElementById('recipeTbody');
+      recipeTbody.innerHTML = '';
+      const pigmentSum = Object.values(result.recipe).reduce((a,b)=>a+b,0);
+      const resinRatio = Math.max(0, 1-pigmentSum);
+
+      const rows = [{name:'透明基料（樹脂）', ratio:resinRatio}];
+      Object.entries(result.recipe).forEach(([id,ratio])=> rows.push({name:id, ratio}));
+
+      let csvLines = ['原料名稱,配方比例(%),添加量(公克)'];
+      rows.forEach((row,idx)=>{
+        const pct = (row.ratio*100).toFixed(3);
+        const grams = (row.ratio*totalWeight).toFixed(3);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="name">${row.name}</td><td class="num">${pct}</td><td class="num">${grams}</td>`;
+        recipeTbody.appendChild(tr);
+        csvLines.push(`${row.name},${pct},${grams}`);
+      });
+      lastRecipeCSV = csvLines.join('\n');
+
+      document.getElementById('recipeDesc').textContent =
+        `以配方總重量 ${totalWeight.toFixed(1)} 公克計算各原料實際添加量`;
+
+      // 色差卡片
+      document.getElementById('mDE').textContent = result.predicted_deltaE.toFixed(3);
+      document.getElementById('mDL').textContent = result.deltaL.toFixed(3);
+      document.getElementById('mDC').textContent = result.deltaC.toFixed(3);
+      document.getElementById('mDH').textContent = result.deltaH.toFixed(3);
+
+      const grade = gradeInfo(result.predicted_deltaE);
+      const gradeBanner = document.getElementById('gradeBanner');
+      gradeBanner.className = 'grade-banner ' + grade.cls;
+      gradeBanner.textContent = grade.text;
+
+      // 圖表
+      const ctx = document.getElementById('spectrumChart').getContext('2d');
+      if (chartInstance) chartInstance.destroy();
+
+      const datasets = [{
+        label: '預測光譜',
+        data: result.predicted_R.map(v=>v*100),
+        borderColor: '#B91C1C',
+        backgroundColor: 'transparent',
+        borderDash: [6,4],
+        pointRadius: 2,
+        tension: 0.15,
+      }];
+      if (targetR){
+        datasets.unshift({
+          label: '目標光譜',
+          data: targetR.map(v=>v*100),
+          borderColor: '#0F766E',
+          backgroundColor: 'transparent',
+          pointRadius: 2,
+          tension: 0.15,
+        });
+      }
+
+      chartInstance = new Chart(ctx, {
+        type:'line',
+        data:{ labels: WAVELENGTHS.map(w=>w+'nm'), datasets },
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          interaction:{mode:'index', intersect:false},
+          plugins:{
+            legend:{ labels:{ font:{family:'sans-serif'}, color:'#1F2430' } },
+            title:{ display:false }
+          },
+          scales:{
+            x:{ title:{display:true, text:'波長 (nm)', color:'#5B6472'}, ticks:{color:'#9AA1AC'} },
+            y:{ title:{display:true, text:'反射率 (%)', color:'#5B6472'}, ticks:{color:'#9AA1AC'}, min:0, max:100 }
+          }
+        }
+      });
+
+      if (!targetR){
+        document.querySelector('.chart-title').textContent =
+          '目標光譜 vs 預測光譜對比 (400nm - 700nm) ｜ 註：目前為 Lab 輸入模式，僅顯示預測光譜';
+      } else {
+        document.querySelector('.chart-title').textContent =
+          '目標光譜 vs 預測光譜對比 (400nm - 700nm)';
+      }
+
+      document.getElementById('emptyPanel').style.display='none';
+      document.getElementById('resultsPanel').classList.add('show');
+      document.getElementById('metricsPanel').classList.add('show');
+      document.getElementById('chartPanel').classList.add('show');
+
+    }catch(err){
+      showError(err.message || String(err));
+    }finally{
+      runBtn.disabled = false;
+      runBtn.textContent = '開始電腦配色';
+    }
+  }, 30);
+});
+
+document.getElementById('downloadBtn').addEventListener('click', ()=>{
+  if (!lastRecipeCSV) return;
+  const blob = new Blob(['\uFEFF'+lastRecipeCSV], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '配方報告.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
 </script>
 </body>
 </html>
