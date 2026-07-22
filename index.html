@@ -420,6 +420,60 @@
       <div class="error-banner" id="errorBanner"></div>
     </div>
 
+    <div class="panel">
+      <p class="panel-title"><span class="dot"></span>現有樣品比色與加色建議</p>
+      <p class="panel-desc">輸入目前實際生產樣品的 31 波長光譜反射率，系統會與上方「目標色彩」比對，診斷偏色方向並建議添加之色漿</p>
+
+      <div class="wl-grid" id="sampleWlGrid"></div>
+
+      <label for="sampleBatchWeight">目前樣品批次重量 (公克)</label>
+      <input type="number" id="sampleBatchWeight" min="1" max="1000000" value="1000" step="10" />
+
+      <button class="run-btn" id="correctBtn" style="background:var(--ink);">分析色差並提出加色建議</button>
+      <div class="error-banner" id="correctErrorBanner"></div>
+    </div>
+
+    <div class="panel results" id="diagnosisPanel">
+      <p class="panel-title"><span class="dot"></span>色差診斷（標準色 vs 樣品色）</p>
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-label">ΔE₀₀（總色差）</div>
+          <div class="metric-value" id="cDE">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">ΔL*（明度）</div>
+          <div class="metric-value" id="cDL">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Δa*（紅綠）</div>
+          <div class="metric-value" id="cDA">--</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Δb*（黃藍）</div>
+          <div class="metric-value" id="cDB">--</div>
+        </div>
+      </div>
+      <div class="grade-banner" id="diagnosisGrade"></div>
+      <div id="diagnosisText" style="margin-top:14px; font-size:13px; line-height:1.9; color:var(--ink-soft);"></div>
+    </div>
+
+    <div class="panel results" id="suggestionPanel">
+      <p class="panel-title"><span class="dot"></span>建議添加色漿</p>
+      <p class="panel-desc" id="suggestionDesc">以目前樣品批次重量 1000.0 公克計算建議添加公克數</p>
+      <table>
+        <thead>
+          <tr><th>色漿編號</th><th style="text-align:right;">建議添加比例 (%)</th><th style="text-align:right;">建議添加量 (公克)</th></tr>
+        </thead>
+        <tbody id="suggestionTbody"></tbody>
+      </table>
+      <p class="hint" id="suggestionResultDE" style="margin-top:10px;"></p>
+    </div>
+
+    <div class="panel results" id="correctionChartPanel">
+      <p class="chart-title">標準色 vs 樣品色 vs 修正後預測光譜對比</p>
+      <div class="chart-wrap" id="correctionChartWrap"></div>
+    </div>
+
     <div class="panel results" id="resultsPanel">
       <p class="panel-title"><span class="dot"></span>推薦最佳配方</p>
       <p class="panel-desc" id="recipeDesc">以配方總重量 20.0 公克計算各原料實際添加量</p>
@@ -1050,6 +1104,15 @@ WAVELENGTHS.forEach(w=>{
   wlGrid.appendChild(wrap);
 });
 
+// 建立「目前樣品色」31 個波長輸入欄位
+const sampleWlGrid = document.getElementById('sampleWlGrid');
+WAVELENGTHS.forEach(w=>{
+  const wrap = document.createElement('div');
+  wrap.className = 'wl-field';
+  wrap.innerHTML = `<label>${w}nm</label><input type="number" step="0.01" min="0" max="100" value="50" data-wl="${w}" />`;
+  sampleWlGrid.appendChild(wrap);
+});
+
 // 輸入模式切換
 const modeSpecBtn = document.getElementById('modeSpecBtn');
 const modeLabBtn = document.getElementById('modeLabBtn');
@@ -1188,6 +1251,28 @@ function gradeInfo(de){
 
 let lastRecipeCSV = '';
 
+// 讀取「目標色彩輸入」區塊目前的數值（光譜或 Lab 模式皆支援）
+function readTargetColor(){
+  let targetLab, targetR = null;
+
+  if (currentMode==='spec'){
+    const vals = Array.from(document.querySelectorAll('#wlGrid input')).map(inp=>parseFloat(inp.value));
+    if (vals.some(v=>isNaN(v))) throw new Error('請完整輸入 31 個波長之反射率數值');
+    const maxVal = Math.max(...vals);
+    targetR = maxVal > 1.5 ? vals.map(v=>v/100) : vals.slice();
+    targetLab = spectrumToLab(targetR);
+  } else {
+    const L = parseFloat(document.getElementById('labL').value);
+    const a = parseFloat(document.getElementById('labA').value);
+    const b = parseFloat(document.getElementById('labB').value);
+    if ([L,a,b].some(v=>isNaN(v))) throw new Error('請完整輸入 L*, a*, b* 數值');
+    const C = Math.sqrt(a*a+b*b);
+    const h = ((Math.atan2(b,a)*180/Math.PI)+360)%360;
+    targetLab = {L,a,b,C,h};
+  }
+  return {targetLab, targetR};
+}
+
 runBtn.addEventListener('click', ()=>{
   clearError();
   runBtn.disabled = true;
@@ -1199,23 +1284,7 @@ runBtn.addEventListener('click', ()=>{
       const filmThickness = parseFloat(document.getElementById('filmThickness').value)||0.1;
       const totalWeight = parseFloat(document.getElementById('totalWeight').value)||20;
 
-      let targetLab, targetR = null;
-
-      if (currentMode==='spec'){
-        const vals = Array.from(document.querySelectorAll('#wlGrid input')).map(inp=>parseFloat(inp.value));
-        if (vals.some(v=>isNaN(v))) throw new Error('請完整輸入 31 個波長之反射率數值');
-        const maxVal = Math.max(...vals);
-        targetR = maxVal > 1.5 ? vals.map(v=>v/100) : vals.slice();
-        targetLab = spectrumToLab(targetR);
-      } else {
-        const L = parseFloat(document.getElementById('labL').value);
-        const a = parseFloat(document.getElementById('labA').value);
-        const b = parseFloat(document.getElementById('labB').value);
-        if ([L,a,b].some(v=>isNaN(v))) throw new Error('請完整輸入 L*, a*, b* 數值');
-        const C = Math.sqrt(a*a+b*b);
-        const h = ((Math.atan2(b,a)*180/Math.PI)+360)%360;
-        targetLab = {L,a,b,C,h};
-      }
+      const {targetLab, targetR} = readTargetColor();
 
       const result = solveFormulation(pigmentDB, targetLab, maxPigments, filmThickness, DEFAULT_RG);
 
@@ -1300,6 +1369,124 @@ document.getElementById('downloadBtn').addEventListener('click', ()=>{
   a.download = '配方報告.csv';
   a.click();
   URL.revokeObjectURL(url);
+});
+
+/* ---------------- 現有樣品比色與加色建議 ---------------- */
+
+// 依 ΔL*/Δa*/Δb* 產生文字化的偏色診斷與加色方向建議（皆為「目標 - 樣品」之差）
+function buildCorrectionDiagnosis(dL, da, db){
+  const threshold = 0.3;
+  const lines = [];
+  if (Math.abs(dL) >= threshold){
+    lines.push(dL > 0
+      ? `樣品偏暗（ΔL* = ${dL.toFixed(2)}），建議增加白色或降低整體色漿濃度以提高明度`
+      : `樣品偏亮（ΔL* = ${dL.toFixed(2)}），建議增加黑色或提高色漿濃度以降低明度`);
+  }
+  if (Math.abs(da) >= threshold){
+    lines.push(da > 0
+      ? `樣品偏綠（Δa* = ${da.toFixed(2)}），建議增加紅色調色漿`
+      : `樣品偏紅（Δa* = ${da.toFixed(2)}），建議增加綠色調色漿`);
+  }
+  if (Math.abs(db) >= threshold){
+    lines.push(db > 0
+      ? `樣品偏藍（Δb* = ${db.toFixed(2)}），建議增加黃色調色漿`
+      : `樣品偏黃（Δb* = ${db.toFixed(2)}），建議增加藍色調色漿`);
+  }
+  if (lines.length===0){
+    lines.push('樣品色與標準色差異極小，色差已在可接受範圍內，暫不需要加色修正');
+  }
+  return lines;
+}
+
+const correctBtn = document.getElementById('correctBtn');
+const correctErrorBanner = document.getElementById('correctErrorBanner');
+
+correctBtn.addEventListener('click', ()=>{
+  correctErrorBanner.classList.remove('show');
+  correctBtn.disabled = true;
+  correctBtn.textContent = '分析中，請稍候...';
+
+  setTimeout(()=>{
+    try{
+      const maxPigments = parseInt(document.getElementById('maxPigments').value)||4;
+      const filmThickness = parseFloat(document.getElementById('filmThickness').value)||0.1;
+      const batchWeight = parseFloat(document.getElementById('sampleBatchWeight').value)||1000;
+
+      const {targetLab, targetR} = readTargetColor();
+
+      const sampleVals = Array.from(document.querySelectorAll('#sampleWlGrid input')).map(inp=>parseFloat(inp.value));
+      if (sampleVals.some(v=>isNaN(v))) throw new Error('請完整輸入目前樣品之 31 個波長反射率數值');
+      const maxSampleVal = Math.max(...sampleVals);
+      const sampleR = maxSampleVal > 1.5 ? sampleVals.map(v=>v/100) : sampleVals.slice();
+      const sampleLab = spectrumToLab(sampleR);
+
+      // 色差診斷（皆為「目標 - 樣品」之差，正值代表樣品需朝該方向調整）
+      const de = deltaE2000(sampleLab, targetLab);
+      const dL = targetLab.L - sampleLab.L;
+      const dA = targetLab.a - sampleLab.a;
+      const dB = targetLab.b - sampleLab.b;
+
+      document.getElementById('cDE').textContent = de.deltaE00.toFixed(3);
+      document.getElementById('cDL').textContent = (dL>=0?'+':'')+dL.toFixed(3);
+      document.getElementById('cDA').textContent = (dA>=0?'+':'')+dA.toFixed(3);
+      document.getElementById('cDB').textContent = (dB>=0?'+':'')+dB.toFixed(3);
+
+      const grade = gradeInfo(de.deltaE00);
+      const diagnosisGrade = document.getElementById('diagnosisGrade');
+      diagnosisGrade.className = 'grade-banner ' + grade.cls;
+      diagnosisGrade.textContent = grade.text;
+
+      const diagLines = buildCorrectionDiagnosis(dL, dA, dB);
+      document.getElementById('diagnosisText').innerHTML =
+        diagLines.map(t=>`<div>・${t}</div>`).join('');
+
+      // 以目前樣品光譜作為背景（Rg），求解需額外添加之色漿薄層，使其趨近目標色
+      const suggestion = solveFormulation(pigmentDB, targetLab, maxPigments, filmThickness, sampleR);
+
+      const suggestionTbody = document.getElementById('suggestionTbody');
+      suggestionTbody.innerHTML = '';
+      const entries = Object.entries(suggestion.recipe);
+
+      if (entries.length===0){
+        suggestionTbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--ink-faint); font-family:var(--sans);">目前色料資料庫中找不到能有效縮小色差的色漿組合</td></tr>`;
+      } else {
+        entries.forEach(([id,ratio])=>{
+          const pct = (ratio*100).toFixed(3);
+          const grams = (ratio*batchWeight).toFixed(2);
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td class="name">${id}</td><td class="num">${pct}</td><td class="num">${grams}</td>`;
+          suggestionTbody.appendChild(tr);
+        });
+      }
+
+      document.getElementById('suggestionDesc').textContent =
+        `以目前樣品批次重量 ${batchWeight.toFixed(1)} 公克計算建議添加公克數`;
+      document.getElementById('suggestionResultDE').textContent =
+        `依上述建議添加後，預估總色差可由 ΔE₀₀ = ${de.deltaE00.toFixed(3)} 降至約 ΔE₀₀ = ${suggestion.predicted_deltaE.toFixed(3)}`;
+
+      // 對比圖：標準色 / 樣品色 / 修正後預測光譜
+      const datasets = [
+        {label:'目前樣品光譜', data:sampleR.map(v=>v*100), color:'#B45309'},
+        {label:'修正後預測光譜', data:suggestion.predicted_R.map(v=>v*100), color:'#0F766E', dash:'6,4'},
+      ];
+      if (targetR){
+        datasets.unshift({label:'標準色光譜', data:targetR.map(v=>v*100), color:'#1F2430'});
+      }
+      renderSpectrumChart(document.getElementById('correctionChartWrap'), WAVELENGTHS, datasets);
+
+      document.getElementById('diagnosisPanel').classList.add('show');
+      document.getElementById('suggestionPanel').classList.add('show');
+      document.getElementById('correctionChartPanel').classList.add('show');
+      document.getElementById('emptyPanel').style.display = 'none';
+
+    }catch(err){
+      correctErrorBanner.textContent = err.message || String(err);
+      correctErrorBanner.classList.add('show');
+    }finally{
+      correctBtn.disabled = false;
+      correctBtn.textContent = '分析色差並提出加色建議';
+    }
+  }, 30);
 });
 </script>
 </body>
