@@ -717,6 +717,23 @@ function guessCategory(pigmentId){
   return 'color';
 }
 
+// 解析「色漿濃度」欄位，同時支援多種常見填寫方式：
+//   "10%"、"1.50%"（文字百分比） / 0.1（小數，代表10%） / 10（純數字，視為10%）
+function parseConcentration(raw){
+  if (raw===null || raw===undefined) return NaN;
+  const s = String(raw).trim();
+  if (s==='') return NaN;
+  if (s.endsWith('%')){
+    const v = parseFloat(s.slice(0,-1));
+    return isNaN(v) ? NaN : v/100;
+  }
+  const v = parseFloat(s);
+  if (isNaN(v)) return NaN;
+  // 數值大於 1 時，視為「以百分比數字表示」（例如 10 代表 10%），故除以 100；
+  // 數值小於等於 1 時，視為已經是小數比例（例如 0.1 代表 10%），維持原樣
+  return v > 1 ? v/100 : v;
+}
+
 // 解析上傳的工作簿，反算每個色漿在各波長之單位 K/S 係數（即濃度=100%時的 K/S）
 // 回傳 { pigments: [{id,category,concentrations,K,S}], warnings: [] }
 function parseSamplingWorkbook(workbook, filmThickness){
@@ -760,7 +777,7 @@ function parseSamplingWorkbook(workbook, filmThickness){
     if (pigCode==='標準板' || pigCode==='黑卡' || pigCode==='白卡') continue;
 
     const sampleId = idxSample!==-1 ? String(row[idxSample]||'').trim() : '';
-    const conc = idxConc!==-1 ? parseFloat(row[idxConc]) : NaN;
+    const conc = idxConc!==-1 ? parseConcentration(row[idxConc]) : NaN;
     if (isNaN(conc) || conc<=0) continue;
 
     const isBlack = sampleId.endsWith('黑卡');
