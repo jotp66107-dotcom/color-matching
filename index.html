@@ -380,6 +380,14 @@
 
       <label for="totalWeight">配方總重量 (公克)</label>
       <input type="number" id="totalWeight" min="1" max="10000" value="20" step="1" />
+
+      <label for="targetConcentration">目標色漿總濃度 (%)</label>
+      <input type="number" id="targetConcentration" min="0" max="100" step="0.1" placeholder="留空則不限制，由系統自動決定" />
+      <p class="hint">設定後，求解時會盡量讓色漿總添加比例接近此濃度（例如配方規格要求總色漿量須為 5%），同時仍以色差最小化為優先目標；留空則不限制濃度，由系統自由決定用量。</p>
+
+      <label for="deTolerance">允許誤差 ΔE₀₀ 上限</label>
+      <input type="number" id="deTolerance" min="0.1" max="10" value="1.0" step="0.1" />
+      <p class="hint">求解會嘗試在色料資料庫中搜尋能讓色差低於此數值的配方／加色組合，並明確標示是否達成；業界一般認為 ΔE₀₀ &lt; 1.0 已達到肉眼難以分辨的精準對色水準。</p>
     </div>
   </div>
 
@@ -460,6 +468,7 @@
     <div class="panel results" id="suggestionPanel">
       <p class="panel-title"><span class="dot"></span>建議添加色漿</p>
       <p class="panel-desc" id="suggestionDesc">以目前樣品批次重量 1000.0 公克計算建議添加公克數</p>
+      <div class="grade-banner" id="suggestionGrade" style="margin-bottom:14px;"></div>
       <table>
         <thead>
           <tr><th>色漿編號</th><th style="text-align:right;">建議添加比例 (%)</th><th style="text-align:right;">建議添加量 (公克)</th></tr>
@@ -994,6 +1003,11 @@ function combinations(arr, k){
 function solveFormulation(pigments, targetLab, maxPigments, filmThickness, Rg, opts={}){
   const earlyStop = opts.earlyStop ?? 0.3;
   const maxCombos = opts.maxCombos ?? 400;
+  // 目標色漿總濃度（0~1 之比例）；null 代表不限制，由色差最小化自由決定用量
+  const targetConcentration = opts.targetConcentration ?? null;
+  // 以「相對於目標值的偏差比例」計算懲罰，避免目標濃度絕對值大小不同時
+  // （例如 0.5% 與 20%）懲罰力道差異過大
+  const CONC_PENALTY_WEIGHT = 60;
 
   const indices = pigments.map((_,i)=>i);
   let best = null; // {deltaE, x, comboIdx}
@@ -1009,19 +1023,40 @@ function solveFormulation(pigments, targetLab, maxPigments, filmThickness, Rg, o
       const comboPigments = comboIdx.map(i=>pigments[i]);
       const bounds = boundsFor(comboPigments);
 
+      // 求解目標函數：以色差為主，若有設定目標濃度則加入軟性懲罰項，
+      // 引導總添加比例趨近目標值，但仍以色差最小化為優先
       const objFn = (ratios) => {
         const R = mixPredictR(ratios, comboPigments, Rg, filmThickness);
         const lab = spectrumToLab(R);
-        return deltaE2000(lab, targetLab).deltaE00;
+        let val = deltaE2000(lab, targetLab).deltaE00;
+        if (targetConcentration !== null && targetConcentration > 0){
+          const sum = ratios.reduce((a,b)=>a+b,0);
+          const rel = (sum-targetConcentration)/targetConcentration;
+          val += CONC_PENALTY_WEIGHT * rel*rel;
+        }
+        return val;
       };
 
       const x0 = bounds.map(b => Math.min(b[1]*0.3, b[1]));
       const {x, fx} = compassSearch(objFn, x0, bounds, 250, clampRatioSum);
 
-      if (best===null || fx < best.deltaE){
-        best = {deltaE:fx, x, comboIdx};
+      const Ractual = mixPredictR(x, comboPigments, Rg, filmThickness);
+      const deActual = deltaE2000(spectrumToLab(Ractual), targetLab).deltaE00;
+      const sumActual = x.reduce((a,b)=>a+b,0);
+
+      // 有設定目標濃度時，以「含懲罰項」的目標函數值挑選組合，讓兼顧濃度與
+      // 色差的組合有機會勝過色差雖略優、但濃度嚴重偏離目標的組合；
+      // 未設定目標濃度時則單純以實際 ΔE 篩選
+      const score = targetConcentration !== null ? fx : deActual;
+
+      if (best===null || score < best.score){
+        best = {score, deltaE:deActual, x, comboIdx};
       }
-      if (best.deltaE <= earlyStop) break outer;
+
+      // 提前停止條件：色差已足夠小，且（若有設定目標濃度）濃度也已相當接近目標
+      const concOk = targetConcentration === null ||
+        Math.abs(sumActual-targetConcentration)/targetConcentration <= 0.15;
+      if (deActual <= earlyStop && concOk) break outer;
     }
   }
 
@@ -1031,6 +1066,7 @@ function solveFormulation(pigments, targetLab, maxPigments, filmThickness, Rg, o
   const R_pred = mixPredictR(best.x, comboPigments, Rg, filmThickness);
   const predLab = spectrumToLab(R_pred);
   const de = deltaE2000(predLab, targetLab);
+  const achievedConcentration = best.x.reduce((a,b)=>a+b,0);
 
   const recipe = {};
   best.comboIdx.forEach((pIdx, j) => {
@@ -1044,6 +1080,7 @@ function solveFormulation(pigments, targetLab, maxPigments, filmThickness, Rg, o
     deltaL: de.deltaL,
     deltaC: de.deltaC,
     deltaH: de.deltaH,
+    achieved_concentration: achievedConcentration,
   };
 }
 
@@ -1283,10 +1320,13 @@ runBtn.addEventListener('click', ()=>{
       const maxPigments = parseInt(document.getElementById('maxPigments').value)||4;
       const filmThickness = parseFloat(document.getElementById('filmThickness').value)||0.1;
       const totalWeight = parseFloat(document.getElementById('totalWeight').value)||20;
+      const targetConcRaw = document.getElementById('targetConcentration').value;
+      const targetConcentration = targetConcRaw==='' ? null : Math.max(0, parseFloat(targetConcRaw))/100;
+      const deTolerance = parseFloat(document.getElementById('deTolerance').value)||1.0;
 
       const {targetLab, targetR} = readTargetColor();
 
-      const result = solveFormulation(pigmentDB, targetLab, maxPigments, filmThickness, DEFAULT_RG);
+      const result = solveFormulation(pigmentDB, targetLab, maxPigments, filmThickness, DEFAULT_RG, {targetConcentration, earlyStop:deTolerance, maxCombos:800});
 
       // 配方表
       const recipeTbody = document.getElementById('recipeTbody');
@@ -1308,8 +1348,12 @@ runBtn.addEventListener('click', ()=>{
       });
       lastRecipeCSV = csvLines.join('\n');
 
-      document.getElementById('recipeDesc').textContent =
-        `以配方總重量 ${totalWeight.toFixed(1)} 公克計算各原料實際添加量`;
+      let recipeDescText = `以配方總重量 ${totalWeight.toFixed(1)} 公克計算各原料實際添加量`;
+      recipeDescText += `　｜　色漿總濃度：實際達成 ${(result.achieved_concentration*100).toFixed(2)}%`;
+      if (targetConcentration !== null){
+        recipeDescText += `（目標 ${(targetConcentration*100).toFixed(2)}%）`;
+      }
+      document.getElementById('recipeDesc').textContent = recipeDescText;
 
       // 色差卡片
       document.getElementById('mDE').textContent = result.predicted_deltaE.toFixed(3);
@@ -1319,8 +1363,10 @@ runBtn.addEventListener('click', ()=>{
 
       const grade = gradeInfo(result.predicted_deltaE);
       const gradeBanner = document.getElementById('gradeBanner');
-      gradeBanner.className = 'grade-banner ' + grade.cls;
-      gradeBanner.textContent = grade.text;
+      const passTol = result.predicted_deltaE <= deTolerance;
+      gradeBanner.className = 'grade-banner ' + (passTol ? grade.cls : 'grade-bad');
+      gradeBanner.textContent = (passTol ? '✅ 已達成容許誤差　' : '⚠️ 未達成容許誤差　') +
+        `ΔE₀₀ = ${result.predicted_deltaE.toFixed(3)}（容許上限 ${deTolerance.toFixed(2)}）　｜　` + grade.text;
 
       // 圖表（純 SVG，無外部相依性）
       const datasets = [{
@@ -1411,6 +1457,9 @@ correctBtn.addEventListener('click', ()=>{
       const maxPigments = parseInt(document.getElementById('maxPigments').value)||4;
       const filmThickness = parseFloat(document.getElementById('filmThickness').value)||0.1;
       const batchWeight = parseFloat(document.getElementById('sampleBatchWeight').value)||1000;
+      const targetConcRaw2 = document.getElementById('targetConcentration').value;
+      const targetConcentration = targetConcRaw2==='' ? null : Math.max(0, parseFloat(targetConcRaw2))/100;
+      const deTolerance = parseFloat(document.getElementById('deTolerance').value)||1.0;
 
       const {targetLab, targetR} = readTargetColor();
 
@@ -1441,7 +1490,7 @@ correctBtn.addEventListener('click', ()=>{
         diagLines.map(t=>`<div>・${t}</div>`).join('');
 
       // 以目前樣品光譜作為背景（Rg），求解需額外添加之色漿薄層，使其趨近目標色
-      const suggestion = solveFormulation(pigmentDB, targetLab, maxPigments, filmThickness, sampleR);
+      const suggestion = solveFormulation(pigmentDB, targetLab, maxPigments, filmThickness, sampleR, {targetConcentration, earlyStop:deTolerance, maxCombos:800});
 
       const suggestionTbody = document.getElementById('suggestionTbody');
       suggestionTbody.innerHTML = '';
@@ -1461,8 +1510,20 @@ correctBtn.addEventListener('click', ()=>{
 
       document.getElementById('suggestionDesc').textContent =
         `以目前樣品批次重量 ${batchWeight.toFixed(1)} 公克計算建議添加公克數`;
-      document.getElementById('suggestionResultDE').textContent =
-        `依上述建議添加後，預估總色差可由 ΔE₀₀ = ${de.deltaE00.toFixed(3)} 降至約 ΔE₀₀ = ${suggestion.predicted_deltaE.toFixed(3)}`;
+
+      const passTol = suggestion.predicted_deltaE <= deTolerance;
+      const suggestionGrade = document.getElementById('suggestionGrade');
+      suggestionGrade.className = 'grade-banner ' + (passTol ? 'grade-good' : 'grade-bad');
+      suggestionGrade.textContent = passTol
+        ? `✅ 已達成容許誤差：加色後 ΔE₀₀ = ${suggestion.predicted_deltaE.toFixed(3)}（容許上限 ${deTolerance.toFixed(2)}）`
+        : `⚠️ 未達成容許誤差：資料庫中最佳解為 ΔE₀₀ = ${suggestion.predicted_deltaE.toFixed(3)}，超過容許上限 ${deTolerance.toFixed(2)}。建議：① 提高「色漿最多使用種類上限」② 確認資料庫中是否有色相更接近標準色的色漿 ③ 若目標濃度設定過緊，嘗試放寬或取消`;
+
+      let deText = `依上述建議添加後，預估總色差可由 ΔE₀₀ = ${de.deltaE00.toFixed(3)} 降至約 ΔE₀₀ = ${suggestion.predicted_deltaE.toFixed(3)}`;
+      deText += `　｜　建議添加總濃度：${(suggestion.achieved_concentration*100).toFixed(2)}%`;
+      if (targetConcentration !== null){
+        deText += `（目標 ${(targetConcentration*100).toFixed(2)}%）`;
+      }
+      document.getElementById('suggestionResultDE').textContent = deText;
 
       // 對比圖：標準色 / 樣品色 / 修正後預測光譜
       const datasets = [
